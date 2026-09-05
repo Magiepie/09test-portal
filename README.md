@@ -70,7 +70,7 @@ git clone https://gitlab.com/ryannathans/2009servertools.git C:\Servers\2009serv
 Clone 09Test Portal, replacing the example URL with this project's Git URL:
 
 ```powershell
-git clone YOUR_09TEST_PORTAL_REPOSITORY_URL C:\Servers\09test-portal
+git clone https://github.com/Magiepie/09test-portal C:\Servers\09test-portal
 ```
 
 Use a dedicated 2009Scape checkout. **Get Test Deploys** recreates its `local-current-test` branch from `origin/master`; do not use a checkout containing uncommitted work you need to keep.
