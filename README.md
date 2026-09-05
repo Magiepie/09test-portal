@@ -1,4 +1,5 @@
 # 09Test Portal
+<img src="picture.png" width="600">
 
 09Test Portal is an authenticated control panel for 2009Scape Test server, an administrator can:
 
