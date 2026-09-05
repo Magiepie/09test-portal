@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Server Logs · 09Test Portal</title>
+  <link rel="stylesheet" href="/assets/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><span class="brand-mark small">09</span><strong>Server Logs</strong></div>
+    <a class="button secondary compact-button" href="/">Back to Portal</a>
+  </header>
+  <main class="log-page">
+    <section class="log-card">
+      <div class="console-header">
+        <div><h2>Latest Server Log</h2><p class="log-location">Saved after crashes and server exits</p></div>
+        <div class="log-actions">
+          <span id="log-status" class="pill">Loading…</span>
+          <button id="refresh-logs" class="button secondary compact-button" type="button">Refresh</button>
+        </div>
+      </div>
+      <pre id="server-log" class="server-log" aria-live="polite">Loading server logs…</pre>
+    </section>
+  </main>
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="/assets/logs.js"></script>
+</body>
+</html>

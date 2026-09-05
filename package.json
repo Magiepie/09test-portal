@@ -1,0 +1,22 @@
+{
+  "name": "09test-portal",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Authenticated control portal for the 2009Scape Current Test stack",
+  "main": "src/server.js",
+  "scripts": {
+    "dev": "node --watch src/server.js",
+    "start": "node src/server.js",
+    "check": "node --check src/server.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "dotenv": "^16.6.1",
+    "express": "^5.1.0",
+    "express-session": "^1.18.2",
+    "helmet": "^8.1.0",
+    "socket.io": "^4.8.1"
+  }
+}

@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>09Test Portal</title>
+  <link rel="stylesheet" href="/assets/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><span class="brand-mark small">09</span><strong>09Test Portal</strong></div>
+    <div class="account"><span id="account-name">Administrator</span><form method="post" action="/auth/logout"><button class="text-button">Sign out</button></form></div>
+  </header>
+  <main class="dashboard">
+    <div class="workspace-grid">
+      <div class="server-workspace">
+        <section class="controls" aria-label="Server controls">
+          <button id="deploy-button" class="button primary">Get Test Deploys</button>
+          <button id="start-button" class="button secondary">Start server</button>
+          <button id="stop-button" class="button danger">Stop server</button>
+          <a class="button secondary" href="/logs" target="_blank" rel="noopener">View Logs</a>
+          <p id="action-message" role="status"></p>
+          <div class="status-card control-status">
+            <span id="status-dot" class="status-dot"></span>
+            <div><small>TEST SERVER</small><strong id="server-status">Loading…</strong></div>
+          </div>
+        </section>
+
+        <section class="console-card">
+          <div class="console-header">
+            <div><h2>Console</h2></div>
+            <span id="deployment-status" class="pill">Deployment idle</span>
+          </div>
+          <div id="console" class="console" role="log" aria-live="polite"></div>
+          <form id="command-form" class="command-bar">
+            <span>&gt;</span>
+            <input id="command" placeholder="Enter a server command" autocomplete="off" maxlength="300">
+            <button type="submit">Send</button>
+          </form>
+        </section>
+      </div>
+
+      <aside class="mr-panel" aria-labelledby="mr-panel-title">
+        <div class="mr-panel-header">
+          <div><p class="eyebrow">ACTIVE STACK</p><h2 id="mr-panel-title">Deployed MRs</h2></div>
+          <span id="mr-count" class="mr-count">0</span>
+        </div>
+        <form id="branch-form" class="branch-form">
+          <input id="branch-url" type="url" placeholder="Paste GitLab branch URL" aria-label="GitLab branch URL" required>
+          <button type="submit">Add</button>
+        </form>
+        <div id="mr-list" class="mr-list"></div>
+      </aside>
+    </div>
+  </main>
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="/assets/app.js"></script>
+</body>
+</html>
