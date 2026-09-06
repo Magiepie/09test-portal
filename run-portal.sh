@@ -14,5 +14,5 @@ fi
 [[ -x .venv/bin/python3 ]] || python3 -m venv .venv
 .venv/bin/python3 -c 'import requests' 2>/dev/null || .venv/bin/python3 -m pip install 'requests~=2.32.3'
 
-echo "Starting 09Test Portal at http://localhost:24247"
+echo "Starting 09Test Portal..."
 exec npm start

@@ -1,5 +1,6 @@
 const crypto = require('node:crypto');
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const { spawn, spawnSync } = require('node:child_process');
 const http = require('node:http');
@@ -30,6 +31,7 @@ const manualBranchesPath = path.join(dataDir, 'manual_branches.json');
 const settingsPath = path.join(dataDir, 'settings.json');
 const serverLogPath = path.join(dataDir, 'server.log');
 const port = Number(process.env.PORT || 24247);
+const host = process.env.HOST || '127.0.0.1';
 const sessionSecret = process.env.SESSION_SECRET || '';
 const localPassword = process.env.ADMIN_PASSWORD || '';
 const discordConfigured = Boolean(
@@ -774,6 +776,16 @@ const scheduleTimer = setInterval(checkRedeploySchedule, 20 * 1000);
 scheduleTimer.unref();
 checkRedeploySchedule();
 
-server.listen(port, '127.0.0.1', () => {
+server.listen(port, host, () => {
   console.log(`09Test Portal: http://localhost:${port}`);
+  if (host === '0.0.0.0' || host === '::') {
+    const addresses = Object.values(os.networkInterfaces()).flat()
+      .filter((address) => address && address.family === 'IPv4' && !address.internal)
+      .map((address) => address.address);
+    for (const address of [...new Set(addresses)]) {
+      console.log(`09Test Portal LAN: http://${address}:${port}`);
+    }
+  } else if (host !== '127.0.0.1' && host !== 'localhost') {
+    console.log(`09Test Portal network: http://${host}:${port}`);
+  }
 });
