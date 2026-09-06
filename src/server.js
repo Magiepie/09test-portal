@@ -18,7 +18,7 @@ const classicServertoolsRoot = path.resolve(process.env.CLASSIC_SERVERTOOLS_ROOT
 const mk2ServertoolsRoot = path.resolve(process.env.MK2_SERVERTOOLS_ROOT || path.join(portalRoot, '..', 'servertools'));
 const portalPython = isWindows
   ? path.join(portalRoot, '.venv', 'Scripts', 'python.exe')
-  : path.join(portalRoot, '.venv', 'bin', 'python3');
+  : path.join(portalRoot, '.venv', 'bin', 'python');
 const configuredPython = process.env.PYTHON_COMMAND || 'python';
 const pythonCommand = configuredPython === 'python' && fs.existsSync(portalPython) ? portalPython : configuredPython;
 const dataDir = path.join(portalRoot, 'data');
