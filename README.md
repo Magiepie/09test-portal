@@ -1,11 +1,12 @@
 # 09Test Portal
-<img src="picture.png" width="600">
+
+<img src="picture.png" width="600" alt="09Test Portal dashboard">
 
 09Test Portal is an authenticated control panel for 2009Scape Test server, an administrator can:
 
 - Build the current merge-request stack in "classic mode" or with real_damighty's deeper checks.
 - See which MRs are deployed and open them on GitLab.
-- Compile, start, and stop the 2009Scape server.
+- Clean, compile, start, and stop the 2009Scape server.
 - Watch the deployment and game-server console live.
 - Open a persistent server log page for reviewing exceptions after a crash or exit.
 - Temporarily drop or re-add individual MRs and automatically rebuild the local stack for debugging.
@@ -24,7 +25,9 @@ The portal then adds its own local features around that deployer:
 - Drop and restore individual MRs for debugging.
 - Add a branch that is not part of the normal MR queue.
 - Save MR names, authors, labels, and links for the Active Stack display.
+- Review authenticated administrative activity and settings changes on the Audit Log page.
 - Recover from an unfinished merge left by an interrupted deployment.
+- Schedule a repeating stop, redeploy, clean compile, and restart workflow.
 
 These additions live inside 09Test Portal. The downloaded servertools projects remain unchanged, which makes them easier to update later.
 
@@ -71,7 +74,7 @@ git clone https://gitlab.com/ryannathans/2009servertools.git C:\Servers\2009serv
 Clone 09Test Portal, replacing the example URL with this project's Git URL:
 
 ```powershell
-git clone https://github.com/Magiepie/09test-portal C:\Servers\09test-portal
+git clone https://github.com/Magiepie/09test-portal.git C:\Servers\09test-portal
 ```
 
 Use a dedicated 2009Scape checkout. **Get Test Deploys** recreates its `local-current-test` branch from `origin/master`; do not use a checkout containing uncommitted work you need to keep.
@@ -114,7 +117,24 @@ After signing in:
 
 The first build takes longer because Maven must download dependencies and compile everything. Temporary GitLab connection failures are retried automatically.
 
-Use **Stop server** to stop only the game server. Double-click `stop_server.bat` to stop both the game server and the 09Test Portal website.
+Server output is written to `data/server.log`. The portal rotates this file every seven days, or earlier if it reaches 5 MB, and retains dated log archives for 30 days.
+
+Use **Stop server** to stop only the game server. Double-click `stop_portal.bat` to stop both the game server and the 09Test Portal website.
+
+## Settings and automatic redeployment
+
+Open **Settings** from the portal header. Discord-authenticated administrators can view the settings, but only someone signed in with the local administrator password can change them or select **Run Now**.
+
+The Settings page controls:
+
+- **Deployment mode:** fast classic mode or the deeper mk2 workflow.
+- **Automatic redeploy and restart:** disabled by default.
+- **First run time:** interpreted using the server computer's local time.
+- **Repeat every:** the interval between deployments; use `4` to match the live test server's four-hour cycle.
+
+At the first scheduled time—and again after every configured interval—the portal stops the game server, rebuilds the latest MR and manually added branch stack, runs a clean Maven compile/package, and starts the server. If deployment or compilation fails, the game server remains offline so an older build is not mistaken for the new test deployment.
+
+The portal must be running for automatic deployments. Its next scheduled time is saved in `data/settings.json`; if the portal was offline when a run became due, it starts one catch-up deployment after the portal launches and then resumes the interval.
 
 ## Untested Linux setup
 
@@ -137,7 +157,7 @@ git -C ~/09test/2009scape lfs pull
 git clone https://gitlab.com/ryannathans/2009servertools.git ~/09test/servertools-classic
 # Optional, only for DEPLOY_MODE=mk2:
 git clone --branch mk2 https://gitlab.com/real_damighty/2009servertools.git ~/09test/servertools-mk2
-git clone YOUR_09TEST_PORTAL_REPOSITORY_URL ~/09test/09test-portal
+git clone https://github.com/Magiepie/09test-portal.git ~/09test/09test-portal
 ```
 
 Create the portal configuration:
@@ -151,6 +171,7 @@ Edit `.env` with Linux paths and a private password:
 
 ```dotenv
 PORT=24247
+HOST=0.0.0.0
 DEPLOY_MODE=classic
 SERVER_ROOT=/home/yourname/09test/2009scape
 CLASSIC_SERVERTOOLS_ROOT=/home/yourname/09test/servertools-classic
@@ -168,17 +189,91 @@ DISCORD_CALLBACK_URL=http://localhost:24247/auth/discord/callback
 Make the scripts and Maven wrapper executable, then launch:
 
 ```bash
-chmod +x run-portal.sh stop-server.sh ~/09test/2009scape/Server/mvnw
+chmod +x run-portal.sh stop-portal.sh ~/09test/2009scape/Server/mvnw
 ./run-portal.sh
 ```
 
 Open `http://localhost:24247` in a browser. To stop the game server and portal:
 
 ```bash
-./stop-server.sh
+./stop-portal.sh
 ```
 
-On Linux, **Start Server** runs `Server/mvnw package -DskipTests`, copies the dependencies JAR to `Server/server.jar`, and starts it with Java 11. Report distribution-specific failures with the portal console output and the contents of `data/server.log`.
+On Linux, **Start Server** runs `Server/mvnw clean package -DskipTests`, copies the dependencies JAR to `Server/server.jar`, and starts it with Java 11. Report distribution-specific failures with the portal console output and the contents of `data/server.log`.
+
+##  FreeBSD setup
+
+> use a supported FreeBSD release from the [official FreeBSD download page](https://www.freebsd.org/where/#download). These instructions use native FreeBSD packages; Linux binary compatibility is not required.
+
+Bootstrap FreeBSD's package manager if necessary, then install the dependencies as `root`:
+
+```sh
+pkg bootstrap
+pkg update
+pkg install git git-lfs npm-node20 python3 devel/py-pip openjdk11 bash
+```
+
+Using `devel/py-pip` lets `pkg` select the pip flavor that matches FreeBSD's current default Python version (for example, `py312-pip`). The portal needs pip only to install `requests` inside its private `.venv`; it does not install Python packages into the system environment.
+
+Set up Git LFS for the account that will run the portal:
+
+```sh
+git lfs install
+```
+
+Clone the server, classic deployer, and portal. Clone mk2 only if you intend to enable it:
+
+```sh
+mkdir -p ~/09test
+git clone https://gitlab.com/2009scape/2009scape.git ~/09test/2009scape
+git -C ~/09test/2009scape lfs pull
+git clone https://gitlab.com/ryannathans/2009servertools.git ~/09test/servertools-classic
+# Optional, only for DEPLOY_MODE=mk2:
+git clone --branch mk2 https://gitlab.com/real_damighty/2009servertools.git ~/09test/servertools-mk2
+git clone https://github.com/Magiepie/09test-portal.git ~/09test/09test-portal
+```
+
+Create and edit the configuration:
+
+```sh
+cd ~/09test/09test-portal
+cp .env.example .env
+```
+
+Example FreeBSD values:
+
+```dotenv
+PORT=24247
+DEPLOY_MODE=classic
+SERVER_ROOT=/usr/home/yourname/09test/2009scape
+CLASSIC_SERVERTOOLS_ROOT=/usr/home/yourname/09test/servertools-classic
+MK2_SERVERTOOLS_ROOT=
+PYTHON_COMMAND=python3
+ADMIN_PASSWORD=replace-with-a-long-unique-password
+```
+
+FreeBSD commonly places native packages under `/usr/local`. The portal locates `java` through `PATH` and derives `JAVA_HOME`, but you can confirm Java 11 before starting:
+
+```sh
+java -version
+node --version
+python3 --version
+```
+
+Make the launchers and Maven wrapper executable, then start the portal:
+
+```sh
+chmod +x run-portal.sh stop-portal.sh ~/09test/2009scape/Server/mvnw
+./run-portal.sh
+```
+
+`HOST=0.0.0.0` allows other computers on the LAN to connect. Open `http://SERVER_IP:24247`—for example, `http://10.0.0.112:24247`. Stop the portal and game server with:
+
+```sh
+./stop-portal.sh
+```
+
+The FreeBSD path uses the same experimental Unix launcher as Linux. If startup fails, include the FreeBSD version, CPU architecture, portal console output, and `data/server.log` when reporting the problem.
 
 ## Add a branch outside the test MR queue
 
@@ -246,7 +341,7 @@ If `DISCORD_ADMIN_ROLE_IDS` is blank, every member of the configured Discord ser
 
 Restart the portal after changing `.env`:
 
-1. Double-click `stop_server.bat`.
+1. Double-click `stop_portal.bat`.
 2. Double-click `run-portal.bat`.
 3. Select **Continue with Discord** on the login page.
 4. Authorize the application.
@@ -276,7 +371,11 @@ SESSION_SECRET=use-a-random-secret-of-at-least-32-characters
 ADMIN_PASSWORD=use-a-long-unique-emergency-password
 ```
 
-`DEPLOY_MODE=classic` uses the quicker merge workflow that the portal used before mk2 was added and does not require Damighty's checkout. To use dependency scans, overlap analysis, compilation checks, and failure isolation, clone Damighty's `mk2` branch, set `MK2_SERVERTOOLS_ROOT` to that folder, and change the mode to `DEPLOY_MODE=mk2`. Restart the portal after changing this setting.
+`DEPLOY_MODE` supplies the initial mode for a new installation. After the first launch, a local administrator can choose **Classic** or **Damighty mk2** on the portal's **Settings** page; that choice is saved in `data/settings.json` and takes priority over `.env`.
+
+**Classic** is the quicker merge workflow and does not require Damighty's checkout. **Damighty mk2** adds dependency scans, overlap analysis, compilation checks, and failure isolation; it requires Damighty's `mk2` branch and a valid `MK2_SERVERTOOLS_ROOT`.
+
+Every **Start Server** action performs `mvnw clean package -DskipTests` before launching Java. The automatic redeploy workflow follows the same rule: stop, deploy, clean build, then start. If the clean build fails, the game server is not started.
 
 Start the portal with:
 
@@ -290,7 +389,7 @@ npm start
 
 - Confirm the launcher window says `09Test Portal: http://localhost:24247`.
 - Confirm Node.js is installed with `node --version`.
-- Stop an older portal instance with `stop_server.bat`, then start it again.
+- Stop an older portal instance with `stop_portal.bat`, then start it again.
 
 ### Java or Maven does not start
 
@@ -328,7 +427,7 @@ git init
 git add .
 git commit -m "Initial 09Test Portal"
 git branch -M main
-git remote add origin YOUR_REPOSITORY_URL
+git remote add origin https://github.com/Magiepie/09test-portal.git
 git push -u origin main
 ```
 
