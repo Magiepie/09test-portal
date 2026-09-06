@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Settings · 09Test Portal</title>
+  <link rel="icon" type="image/png" href="/assets/09logo.png">
+  <link rel="stylesheet" href="/assets/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><img class="brand-mark small" src="/assets/09logo.png" alt="2009Scape"><strong>Settings</strong></div>
+    <div class="account"><a class="text-button nav-link" href="/audit">Audit Log</a><a class="button secondary compact-button" href="/">Back to Portal</a></div>
+  </header>
+  <main class="settings-page">
+    <section class="settings-card">
+      <div class="settings-heading">
+        <div><p class="eyebrow">OPERATIONS</p><h2>Deployment settings</h2></div>
+        <span id="settings-access" class="pill">Loading…</span>
+      </div>
+      <p id="settings-note" class="muted"></p>
+      <form id="settings-form">
+        <label for="deploy-mode">Deployment mode</label>
+        <select id="deploy-mode" name="deployMode">
+          <option value="classic">Classic — faster</option>
+          <option value="mk2">mk2 — deeper checks</option>
+        </select>
+
+        <label class="check-row" for="daily-enabled">
+          <input id="daily-enabled" name="dailyRedeployEnabled" type="checkbox">
+          <span><strong>Automatic redeploy and restart</strong><small>Stop server, deploy the latest stack, clean compile, then start.</small></span>
+        </label>
+
+        <label for="daily-time">First run time (server local time)</label>
+        <input id="daily-time" name="dailyRedeployTime" type="time" required>
+        <label for="interval-hours">Repeat every (hours)</label>
+        <input id="interval-hours" name="redeployIntervalHours" type="number" min="1" max="168" step="1" required>
+        <p id="last-run" class="muted settings-small"></p>
+
+        <div class="settings-actions">
+          <button id="save-settings" class="button primary" type="submit">Save Settings</button>
+          <button id="run-schedule-now" class="button secondary" type="button">Run Now</button>
+        </div>
+        <p id="settings-message" role="status"></p>
+      </form>
+    </section>
+  </main>
+  <script src="/assets/settings.js"></script>
+</body>
+</html>

@@ -203,16 +203,19 @@ function appendLine(entry) {
 function renderState(state) {
   currentState = state;
   const online = state.server === 'online';
+  const serverBusy = ['compiling', 'starting', 'stopping'].includes(state.server);
   const deploying = state.deployment === 'running';
-  document.querySelector('#server-status').textContent = online ? 'Online' : 'Offline';
-  document.querySelector('#status-dot').classList.toggle('online', online);
+  const labels = { offline: 'Offline', deploying: 'Deploying', compiling: 'Compiling', starting: 'Starting', online: 'Online', stopping: 'Stopping' };
+  document.querySelector('#server-status').textContent = labels[state.server] || 'Offline';
+  const statusDot = document.querySelector('#status-dot');
+  statusDot.className = `status-dot ${state.server || 'offline'}`;
   document.querySelector('#deployment-status').textContent = deploying ? 'Deployment running' : 'Deployment idle';
-  document.querySelector('#deploy-button').disabled = deploying || online;
-  document.querySelector('#start-button').disabled = online || deploying;
-  document.querySelector('#stop-button').disabled = !online;
+  document.querySelector('#deploy-button').disabled = deploying || online || serverBusy;
+  document.querySelector('#start-button').disabled = online || deploying || serverBusy;
+  document.querySelector('#stop-button').disabled = !online && !serverBusy;
   document.querySelector('#command').disabled = !online;
-  document.querySelector('#branch-url').disabled = deploying || online;
-  document.querySelector('#branch-form button').disabled = deploying || online;
+  document.querySelector('#branch-url').disabled = deploying || online || serverBusy;
+  document.querySelector('#branch-form button').disabled = deploying || online || serverBusy;
   renderMrs(state.deployedMrs, state.manualBranches);
 }
 

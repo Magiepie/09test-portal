@@ -13,10 +13,8 @@ const { Server: SocketServer } = require('socket.io');
 const portalRoot = path.resolve(__dirname, '..');
 const isWindows = process.platform === 'win32';
 const serverRoot = path.resolve(process.env.SERVER_ROOT || path.join(portalRoot, '..', '2009scape'));
-const deployMode = String(process.env.DEPLOY_MODE || 'classic').toLowerCase() === 'mk2' ? 'mk2' : 'classic';
 const classicServertoolsRoot = path.resolve(process.env.CLASSIC_SERVERTOOLS_ROOT || path.join(portalRoot, '..', 'servertools-ryan-legacy'));
 const mk2ServertoolsRoot = path.resolve(process.env.MK2_SERVERTOOLS_ROOT || path.join(portalRoot, '..', 'servertools'));
-const servertoolsRoot = deployMode === 'mk2' ? mk2ServertoolsRoot : classicServertoolsRoot;
 const portalPython = isWindows
   ? path.join(portalRoot, '.venv', 'Scripts', 'python.exe')
   : path.join(portalRoot, '.venv', 'bin', 'python3');
@@ -29,6 +27,7 @@ const portalPidPath = path.join(dataDir, 'portal.pid');
 const deployedMrsPath = path.join(dataDir, 'deployed_mrs.json');
 const droppedMrsPath = path.join(dataDir, 'dropped_mrs.json');
 const manualBranchesPath = path.join(dataDir, 'manual_branches.json');
+const settingsPath = path.join(dataDir, 'settings.json');
 const serverLogPath = path.join(dataDir, 'server.log');
 const port = Number(process.env.PORT || 24247);
 const sessionSecret = process.env.SESSION_SECRET || '';
@@ -79,12 +78,16 @@ app.use(sessionMiddleware);
 const consoleBuffer = [];
 const MAX_CONSOLE_LINES = 2000;
 const MAX_SERVER_LOG_BYTES = 5 * 1024 * 1024;
+const SERVER_LOG_ROTATION_MS = 7 * 24 * 60 * 60 * 1000;
+const SERVER_LOG_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 const partialConsoleLines = new Map();
 let serverProcess = null;
 let deployProcess = null;
+let serverPhase = 'offline';
 let serverStartedAt = null;
 let lastExit = null;
 let deployedMrs = [];
+let pendingAfterServerStop = null;
 
 function scanDeployedMrs() {
   if (fs.existsSync(deployedMrsPath)) {
@@ -137,6 +140,42 @@ function writeManualBranches(branches) {
   fs.writeFileSync(manualBranchesPath, `${JSON.stringify(branches, null, 2)}\n`, 'utf8');
 }
 
+function readSettings() {
+  const defaults = {
+    deployMode: String(process.env.DEPLOY_MODE || 'classic').toLowerCase() === 'mk2' ? 'mk2' : 'classic',
+    dailyRedeployEnabled: false,
+    dailyRedeployTime: '04:00',
+    redeployIntervalHours: 4,
+    nextScheduledAt: '',
+    lastScheduledAt: '',
+    lastScheduledDate: '',
+  };
+  if (!fs.existsSync(settingsPath)) return defaults;
+  const parsed = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
+  return { ...defaults, ...parsed };
+}
+
+function writeSettings(settings) {
+  fs.writeFileSync(settingsPath, `${JSON.stringify(settings, null, 2)}\n`, 'utf8');
+}
+
+function nextIntervalOccurrence(time, intervalHours, now = new Date()) {
+  const [hours, minutes] = time.split(':').map(Number);
+  const next = new Date(now);
+  next.setHours(hours, minutes, 0, 0);
+  const intervalMs = intervalHours * 60 * 60 * 1000;
+  while (next <= now) next.setTime(next.getTime() + intervalMs);
+  return next;
+}
+
+function selectedDeployMode() {
+  return readSettings().deployMode === 'mk2' ? 'mk2' : 'classic';
+}
+
+function selectedServertoolsRoot() {
+  return selectedDeployMode() === 'mk2' ? mk2ServertoolsRoot : classicServertoolsRoot;
+}
+
 function parseGitlabBranchUrl(value) {
   let parsed;
   try { parsed = new URL(String(value || '').trim()); }
@@ -176,9 +215,36 @@ function audit(actor, action, detail = '') {
   fs.appendFileSync(auditPath, line, 'utf8');
 }
 
+function maintainServerLogs() {
+  const now = Date.now();
+  if (fs.existsSync(serverLogPath)) {
+    const stats = fs.statSync(serverLogPath);
+    const tooLarge = stats.size >= MAX_SERVER_LOG_BYTES;
+    const tooOld = now - stats.birthtimeMs >= SERVER_LOG_ROTATION_MS;
+    if (tooLarge || tooOld) {
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+      fs.renameSync(serverLogPath, path.join(dataDir, `server-${stamp}.log`));
+    }
+  }
+  for (const name of fs.readdirSync(dataDir)) {
+    if (!/^server-\d{4}-\d{2}-\d{2}T.*\.log$/.test(name)) continue;
+    const archivedPath = path.join(dataDir, name);
+    if (now - fs.statSync(archivedPath).mtimeMs > SERVER_LOG_RETENTION_MS) fs.unlinkSync(archivedPath);
+  }
+}
+
 function emitConsoleLine(source, line) {
   if (!line) return;
   let cleanLine = line.replace(/\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g, '');
+  if (source === 'server' && cleanLine.includes('__09TEST_STARTING__')) {
+    serverPhase = 'starting';
+    broadcastState();
+    return;
+  }
+  if (source === 'server' && /\[Server\]\s+2009Scape started in\b/i.test(cleanLine)) {
+    serverPhase = 'online';
+    broadcastState();
+  }
   if (source === 'deploy') cleanLine = cleanLine.replace(/^\d{2}:\d{2}:\d{2}\s+(?=(?:DEBUG|INFO|WARNING|ERROR|CRITICAL)\b)/, '');
   if (source === 'deploy' && cleanLine.startsWith('[maven] ')) {
     source = 'maven';
@@ -190,10 +256,7 @@ function emitConsoleLine(source, line) {
   const entry = { at: new Date().toISOString(), source, line: cleanLine };
   if (source === 'server') {
     try {
-      if (fs.existsSync(serverLogPath) && fs.statSync(serverLogPath).size >= MAX_SERVER_LOG_BYTES) {
-        if (fs.existsSync(`${serverLogPath}.previous`)) fs.unlinkSync(`${serverLogPath}.previous`);
-        fs.renameSync(serverLogPath, `${serverLogPath}.previous`);
-      }
+      maintainServerLogs();
       fs.appendFileSync(serverLogPath, `${entry.at}\t${cleanLine}\n`, 'utf8');
     } catch (error) {
       console.error(`Could not write server log: ${error.message}`);
@@ -221,13 +284,15 @@ function addConsole(source, text, stream = 'combined', flush = true) {
 }
 
 function state() {
+  const lifecycle = deployProcess ? 'deploying' : serverPhase;
   return {
-    server: serverProcess ? 'online' : 'offline',
+    server: lifecycle,
     deployment: deployProcess ? 'running' : 'idle',
     startedAt: serverStartedAt,
     lastExit,
     deployedMrs,
     manualBranches: readManualBranches(),
+    deployMode: selectedDeployMode(),
   };
 }
 
@@ -270,15 +335,15 @@ function startServer(actor) {
   if (serverProcess) throw new Error('The server is already running.');
   if (deployProcess) throw new Error('Wait for the MR deployment to finish.');
 
-  const script = path.join(serverRoot, 'run-server.bat');
-  if (isWindows && !fs.existsSync(script)) throw new Error(`The server launcher was not found: ${script}`);
-  const linuxWrapper = path.join(serverRoot, 'Server', 'mvnw');
-  if (!isWindows && !fs.existsSync(linuxWrapper)) throw new Error(`The Maven wrapper was not found: ${linuxWrapper}`);
+  const mavenWrapper = path.join(serverRoot, 'Server', isWindows ? 'mvnw.cmd' : 'mvnw');
+  if (!fs.existsSync(mavenWrapper)) throw new Error(`The Maven wrapper was not found: ${mavenWrapper}`);
+  maintainServerLogs();
   fs.appendFileSync(serverLogPath, `\n${new Date().toISOString()}\t===== SERVER START =====\n`, 'utf8');
   const executable = isWindows ? 'cmd.exe' : 'bash';
   const launchArgs = isWindows
-    ? ['/d', '/s', '/c', 'call run-server.bat']
-    : ['-lc', 'cd Server && ./mvnw package -DskipTests && cp target/*-with-dependencies.jar server.jar && exec java -jar server.jar'];
+    ? ['/d', '/s', '/c', 'cd /d Server && call mvnw.cmd clean package -DskipTests && xcopy /Y target\*-with-dependencies.jar server.jar* >nul && echo __09TEST_STARTING__ && java -jar server.jar']
+    : ['-lc', 'cd Server && ./mvnw clean package -DskipTests && cp target/*-with-dependencies.jar server.jar && echo __09TEST_STARTING__ && exec java -jar server.jar'];
+  serverPhase = 'compiling';
   serverProcess = spawn(executable, launchArgs, {
     cwd: serverRoot,
     env: javaEnvironment(),
@@ -292,17 +357,24 @@ function startServer(actor) {
   attachProcess(serverProcess, 'server', (code, signal) => {
     lastExit = { code, signal, at: new Date().toISOString() };
     serverProcess = null;
+    serverPhase = 'offline';
     serverStartedAt = null;
+    const afterStop = pendingAfterServerStop;
+    pendingAfterServerStop = null;
     try { fs.unlinkSync(serverPidPath); } catch (error) {
       if (error.code !== 'ENOENT') addConsole('portal', `Could not remove stale server PID file: ${error.message}`);
     }
+    if (afterStop) setImmediate(afterStop);
   });
   broadcastState();
 }
 
-function stopServer(actor) {
+function stopServer(actor, afterStop = null) {
   if (!serverProcess) throw new Error('The server is not running.');
+  if (afterStop) pendingAfterServerStop = afterStop;
   const pid = serverProcess.pid;
+  serverPhase = 'stopping';
+  broadcastState();
   audit(actor, 'server.stop', `pid=${pid}`);
   if (isWindows) {
     spawn('taskkill.exe', ['/PID', String(pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' });
@@ -311,18 +383,20 @@ function stopServer(actor) {
   }
 }
 
-function deployCurrentTest(actor) {
+function deployCurrentTest(actor, afterDeploy = null) {
   if (deployProcess) throw new Error('An MR deployment is already running.');
   if (serverProcess) throw new Error('Stop the server before rebuilding the MR stack.');
 
   const script = path.join(portalRoot, 'scripts', 'deploy_current_test.py');
+  const mode = selectedDeployMode();
+  const toolsRoot = selectedServertoolsRoot();
   deployProcess = spawn(pythonCommand, [
     script,
     '--server-root', serverRoot,
-    '--servertools-root', servertoolsRoot,
+    '--servertools-root', toolsRoot,
     '--manifest', deployedMrsPath,
     '--exclusions', droppedMrsPath,
-    '--mode', deployMode,
+    '--mode', mode,
     '--manual-branches', manualBranchesPath,
   ], {
     cwd: serverRoot,
@@ -335,12 +409,52 @@ function deployCurrentTest(actor) {
     audit('system', 'deployment.exit', `code=${code}`);
     deployProcess = null;
     if (code === 0) deployedMrs = scanDeployedMrs();
+    if (afterDeploy) setImmediate(() => afterDeploy(code));
   });
   broadcastState();
 }
 
+function redeployAndRestart(actor) {
+  if (deployProcess) throw new Error('An MR deployment is already running.');
+
+  const beginDeployment = () => {
+    try {
+      addConsole('portal', 'Starting scheduled Current Test deployment...');
+      deployCurrentTest(actor, (code) => {
+        if (code !== 0) {
+          addConsole('portal', 'Scheduled deployment failed; the game server will remain offline.');
+          return;
+        }
+        try {
+          addConsole('portal', 'Deployment succeeded; compiling and starting the game server...');
+          startServer(actor);
+        } catch (error) {
+          addConsole('portal', `Scheduled server start failed: ${error.message}`);
+        }
+      });
+    } catch (error) {
+      addConsole('portal', `Scheduled deployment could not start: ${error.message}`);
+    }
+  };
+
+  if (serverProcess) {
+    addConsole('portal', 'Automatic redeploy starting; stopping the game server first...');
+    stopServer(actor, beginDeployment);
+  } else {
+    beginDeployment();
+  }
+}
+
 function requireAdmin(req, res, next) {
   if (!req.session.user) return res.status(401).json({ error: 'Authentication required.' });
+  next();
+}
+
+function requireLocalAdmin(req, res, next) {
+  if (!req.session.user) return res.status(401).json({ error: 'Authentication required.' });
+  if (req.session.user.provider !== 'local') {
+    return res.status(403).json({ error: 'Only the local administrator can perform this action.' });
+  }
   next();
 }
 
@@ -360,6 +474,16 @@ app.get('/', (req, res) => {
 app.get('/logs', (req, res) => {
   if (!req.session.user) return res.redirect('/');
   res.sendFile(path.join(portalRoot, 'public', 'logs.html'));
+});
+
+app.get('/settings', (req, res) => {
+  if (!req.session.user) return res.redirect('/');
+  res.sendFile(path.join(portalRoot, 'public', 'settings.html'));
+});
+
+app.get('/audit', (req, res) => {
+  if (!req.session.user || req.session.user.provider !== 'local') return res.redirect('/');
+  res.sendFile(path.join(portalRoot, 'public', 'audit.html'));
 });
 
 app.post('/auth/local', (req, res) => {
@@ -454,6 +578,78 @@ app.get('/api/logs', requireAdmin, (req, res) => {
   res.json({ content, state: state() });
 });
 
+app.get('/api/audit', requireLocalAdmin, (req, res) => {
+  try {
+    const lines = fs.existsSync(auditPath)
+      ? fs.readFileSync(auditPath, 'utf8').split(/\r?\n/).filter(Boolean).slice(-1000).reverse()
+      : [];
+    const entries = lines.map((line) => {
+      const [at = '', actor = '', action = '', ...detail] = line.split('\t');
+      return { at, actor, action, detail: detail.join('\t') };
+    });
+    res.json({ entries });
+  } catch (error) {
+    res.status(500).json({ error: `Could not read the audit log: ${error.message}` });
+  }
+});
+
+app.get('/api/settings', requireAdmin, (req, res) => {
+  res.json({ settings: readSettings(), canEdit: req.session.user.provider === 'local' });
+});
+
+app.put('/api/settings', requireLocalAdmin, (req, res) => {
+  try {
+    const deployMode = req.body.deployMode === 'mk2' ? 'mk2' : req.body.deployMode === 'classic' ? 'classic' : null;
+    const dailyRedeployTime = String(req.body.dailyRedeployTime || '');
+    const redeployIntervalHours = Number(req.body.redeployIntervalHours);
+    if (!deployMode) return res.status(400).json({ error: 'Choose classic or mk2 deployment mode.' });
+    if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(dailyRedeployTime)) {
+      return res.status(400).json({ error: 'Enter the first run time as HH:MM.' });
+    }
+    if (!Number.isInteger(redeployIntervalHours) || redeployIntervalHours < 1 || redeployIntervalHours > 168) {
+      return res.status(400).json({ error: 'Enter a restart interval from 1 to 168 hours.' });
+    }
+    const previous = readSettings();
+    const dailyRedeployEnabled = req.body.dailyRedeployEnabled === true;
+    const scheduleChanged = previous.dailyRedeployTime !== dailyRedeployTime
+      || previous.dailyRedeployEnabled !== dailyRedeployEnabled
+      || previous.redeployIntervalHours !== redeployIntervalHours;
+    const settings = {
+      ...previous,
+      deployMode,
+      dailyRedeployEnabled,
+      dailyRedeployTime,
+      redeployIntervalHours,
+      nextScheduledAt: scheduleChanged && dailyRedeployEnabled
+        ? nextIntervalOccurrence(dailyRedeployTime, redeployIntervalHours).toISOString()
+        : dailyRedeployEnabled ? previous.nextScheduledAt : '',
+      lastScheduledAt: scheduleChanged ? '' : previous.lastScheduledAt,
+      lastScheduledDate: scheduleChanged ? '' : previous.lastScheduledDate,
+    };
+    writeSettings(settings);
+    const changed = [];
+    if (previous.deployMode !== settings.deployMode) changed.push(`deployment mode: ${previous.deployMode} -> ${settings.deployMode}`);
+    if (previous.dailyRedeployEnabled !== settings.dailyRedeployEnabled) changed.push(`automatic redeploy: ${previous.dailyRedeployEnabled ? 'enabled' : 'disabled'} -> ${settings.dailyRedeployEnabled ? 'enabled' : 'disabled'}`);
+    if (previous.dailyRedeployTime !== settings.dailyRedeployTime) changed.push(`first run: ${previous.dailyRedeployTime} -> ${settings.dailyRedeployTime}`);
+    if (previous.redeployIntervalHours !== settings.redeployIntervalHours) changed.push(`interval: ${previous.redeployIntervalHours}h -> ${settings.redeployIntervalHours}h`);
+    audit(userLabel(req), 'settings.update', changed.length ? changed.join('; ') : 'no changes');
+    broadcastState();
+    res.json({ settings, canEdit: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/settings/redeploy-now', requireLocalAdmin, (req, res) => {
+  try {
+    redeployAndRestart(userLabel(req));
+    audit(userLabel(req), 'schedule.run_now');
+    res.status(202).json(state());
+  } catch (error) {
+    res.status(409).json({ error: error.message });
+  }
+});
+
 app.post('/api/server/start', requireAdmin, (req, res) => {
   try { startServer(userLabel(req)); res.status(202).json(state()); }
   catch (error) { res.status(409).json({ error: error.message }); }
@@ -544,6 +740,39 @@ io.on('connection', (socket) => {
   socket.join('admins');
   socket.emit('state', state());
 });
+
+function checkRedeploySchedule() {
+  try {
+    const settings = readSettings();
+    if (!settings.dailyRedeployEnabled) return;
+    const now = new Date();
+    let next = settings.nextScheduledAt
+      ? new Date(settings.nextScheduledAt)
+      : nextIntervalOccurrence(settings.dailyRedeployTime, settings.redeployIntervalHours, now);
+    if (Number.isNaN(next.getTime())) {
+      next = nextIntervalOccurrence(settings.dailyRedeployTime, settings.redeployIntervalHours, now);
+    }
+    if (!settings.nextScheduledAt) {
+      settings.nextScheduledAt = next.toISOString();
+      writeSettings(settings);
+      return;
+    }
+    if (now < next) return;
+    redeployAndRestart('interval-scheduler');
+    settings.lastScheduledAt = now.toISOString();
+    const intervalMs = settings.redeployIntervalHours * 60 * 60 * 1000;
+    do { next = new Date(next.getTime() + intervalMs); } while (next <= now);
+    settings.nextScheduledAt = next.toISOString();
+    writeSettings(settings);
+    audit('interval-scheduler', 'schedule.start', `next=${settings.nextScheduledAt}; interval=${settings.redeployIntervalHours}h`);
+  } catch (error) {
+    addConsole('portal', `Automatic schedule could not run: ${error.message}`);
+  }
+}
+
+const scheduleTimer = setInterval(checkRedeploySchedule, 20 * 1000);
+scheduleTimer.unref();
+checkRedeploySchedule();
 
 server.listen(port, '127.0.0.1', () => {
   console.log(`09Test Portal: http://localhost:${port}`);

@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Audit Log · 09Test Portal</title>
+  <link rel="icon" type="image/png" href="/assets/09logo.png">
+  <link rel="stylesheet" href="/assets/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><img class="brand-mark small" src="/assets/09logo.png" alt="2009Scape"><strong>Audit Log</strong></div>
+    <div class="account"><a class="text-button nav-link" href="/settings">Settings</a><a class="button secondary compact-button" href="/">Back to Portal</a></div>
+  </header>
+  <main class="audit-page">
+    <section class="audit-card">
+      <div class="settings-heading">
+        <div><p class="eyebrow">ADMINISTRATION</p><h2>Recent activity</h2></div>
+        <button id="refresh-audit" class="button secondary compact-button" type="button">Refresh</button>
+      </div>
+      <p class="muted">Authentication, server operations, deployments, stack changes, and settings updates. Newest events appear first.</p>
+      <p id="audit-message" role="status"></p>
+      <div class="audit-table-wrap">
+        <table class="audit-table">
+          <thead><tr><th>Time</th><th>Administrator</th><th>Action</th><th>Details</th></tr></thead>
+          <tbody id="audit-entries"></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+  <script src="/assets/audit.js"></script>
+</body>
+</html>
