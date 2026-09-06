@@ -227,7 +227,7 @@ Clone the server, classic deployer, and portal. Clone mk2 only if you intend to 
 mkdir -p ~/09test
 git clone https://gitlab.com/2009scape/2009scape.git ~/09test/2009scape
 git -C ~/09test/2009scape lfs pull
-git clone https://gitlab.com/ryannathans/2009servertools.git ~/09test/servertools-classic
+git clone https://gitlab.com/ryannathans/2009servertools.git ~/09test/2009servertools-classic
 # Optional, only for DEPLOY_MODE=mk2:
 git clone --branch mk2 https://gitlab.com/real_damighty/2009servertools.git ~/09test/servertools-mk2
 git clone https://github.com/Magiepie/09test-portal.git ~/09test/09test-portal
@@ -244,11 +244,12 @@ Example FreeBSD values:
 
 ```dotenv
 PORT=24247
+HOST=0.0.0.0
 DEPLOY_MODE=classic
-SERVER_ROOT=/usr/home/yourname/09test/2009scape
-CLASSIC_SERVERTOOLS_ROOT=/usr/home/yourname/09test/servertools-classic
+SERVER_ROOT=root/09test/2009scape
+CLASSIC_SERVERTOOLS_ROOT=root/09test/2009servertools-classic
 MK2_SERVERTOOLS_ROOT=
-PYTHON_COMMAND=python3
+PYTHON_COMMAND=python
 ADMIN_PASSWORD=replace-with-a-long-unique-password
 ```
 
