@@ -9,15 +9,14 @@
 </head>
 <body class="login-page">
   <main class="login-card">
-    <img class="brand-mark" src="/assets/09logo.png" alt="2009Scape">
-    <h1>09Test Portal</h1>
-    <p class="muted">Restricted access to the Current Test deployment and live server console.</p>
+    <div class="login-brand"><img class="brand-mark" src="/assets/09logo.png" alt="2009Scape"><h1>09Test Portal</h1></div>
+    <p class="muted">Restricted access to the Current Test deployment</p>
     <a class="button discord" href="/auth/discord">Continue with Discord</a>
-    <div class="separator"><span>Emergency access</span></div>
+    <div class="separator"><span>or</span></div>
     <form method="post" action="/auth/local">
-      <label for="password">Local administrator password</label>
+      <label for="password">Administrator password</label>
       <input id="password" name="password" type="password" autocomplete="current-password" required>
-      <button class="button secondary" type="submit">Sign in locally</button>
+      <button class="button secondary" type="submit">Sign in</button>
     </form>
   </main>
 </body>

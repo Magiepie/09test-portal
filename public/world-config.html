@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>World Configuration · 09Test Portal</title>
+  <link rel="icon" type="image/png" href="/assets/09logo.png">
+  <link rel="stylesheet" href="/assets/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><img class="brand-mark small" src="/assets/09logo.png" alt="2009Scape"><strong>World Configuration</strong></div>
+    <div class="account"><a class="text-button nav-link" href="/audit">Audit Log</a><a class="text-button nav-link" href="/settings">Settings</a><a class="button secondary compact-button" href="/">Back to Portal</a></div>
+  </header>
+  <main class="config-page">
+    <section class="config-card">
+      <div class="settings-heading">
+        <div><p class="eyebrow">SERVER CONFIGURATION</p><h2>Edit default.conf</h2></div>
+        <span class="pill">Local admin only</span>
+      </div>
+      <p id="config-path" class="muted settings-small">Loading configuration…</p>
+      <div class="config-editor-shell">
+        <pre id="config-highlight" aria-hidden="true"></pre>
+        <textarea id="config-editor" aria-label="default.conf contents" autocomplete="off" autocapitalize="off" spellcheck="false"></textarea>
+      </div>
+      <div class="config-footer">
+        <p id="config-message" role="status"></p>
+        <button id="save-config" class="button primary" type="button">Save default.conf</button>
+      </div>
+      <p class="muted settings-small">A backup is created as <code>default.conf.backup</code> before each save. Restart the game server to apply changes.</p>
+    </section>
+  </main>
+  <script src="/assets/world-config.js"></script>
+</body>
+</html>

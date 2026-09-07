@@ -30,6 +30,7 @@ const droppedMrsPath = path.join(dataDir, 'dropped_mrs.json');
 const manualBranchesPath = path.join(dataDir, 'manual_branches.json');
 const settingsPath = path.join(dataDir, 'settings.json');
 const serverLogPath = path.join(dataDir, 'server.log');
+const worldConfigPath = path.join(serverRoot, 'Server', 'worldprops', 'default.conf');
 const port = Number(process.env.PORT || 24247);
 const host = process.env.HOST || '127.0.0.1';
 const sessionSecret = process.env.SESSION_SECRET || '';
@@ -90,6 +91,9 @@ let serverStartedAt = null;
 let lastExit = null;
 let deployedMrs = [];
 let pendingAfterServerStop = null;
+let scheduledRestartTimer = null;
+let scheduledRestartAt = null;
+let lastServerLogCleanupAt = 0;
 
 function scanDeployedMrs() {
   if (fs.existsSync(deployedMrsPath)) {
@@ -222,16 +226,34 @@ function maintainServerLogs() {
   if (fs.existsSync(serverLogPath)) {
     const stats = fs.statSync(serverLogPath);
     const tooLarge = stats.size >= MAX_SERVER_LOG_BYTES;
-    const tooOld = now - stats.birthtimeMs >= SERVER_LOG_ROTATION_MS;
+    let startedAt = 0;
+    if (stats.size > 0) {
+      const descriptor = fs.openSync(serverLogPath, 'r');
+      try {
+        const head = Buffer.alloc(Math.min(stats.size, 2048));
+        fs.readSync(descriptor, head, 0, head.length, 0);
+        const timestamp = head.toString('utf8').match(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z/);
+        if (timestamp) startedAt = Date.parse(timestamp[0]);
+      } finally {
+        fs.closeSync(descriptor);
+      }
+    }
+    if (!Number.isFinite(startedAt) || startedAt <= 0) {
+      startedAt = stats.birthtimeMs > 0 ? stats.birthtimeMs : stats.ctimeMs > 0 ? stats.ctimeMs : stats.mtimeMs;
+    }
+    const tooOld = Number.isFinite(startedAt) && startedAt > 0 && now - startedAt >= SERVER_LOG_ROTATION_MS;
     if (tooLarge || tooOld) {
       const stamp = new Date().toISOString().replace(/[:.]/g, '-');
       fs.renameSync(serverLogPath, path.join(dataDir, `server-${stamp}.log`));
     }
   }
-  for (const name of fs.readdirSync(dataDir)) {
-    if (!/^server-\d{4}-\d{2}-\d{2}T.*\.log$/.test(name)) continue;
-    const archivedPath = path.join(dataDir, name);
-    if (now - fs.statSync(archivedPath).mtimeMs > SERVER_LOG_RETENTION_MS) fs.unlinkSync(archivedPath);
+  if (now - lastServerLogCleanupAt >= 60 * 60 * 1000) {
+    lastServerLogCleanupAt = now;
+    for (const name of fs.readdirSync(dataDir)) {
+      if (!/^server-\d{4}-\d{2}-\d{2}T.*\.log$/.test(name)) continue;
+      const archivedPath = path.join(dataDir, name);
+      if (now - fs.statSync(archivedPath).mtimeMs > SERVER_LOG_RETENTION_MS) fs.unlinkSync(archivedPath);
+    }
   }
 }
 
@@ -286,10 +308,11 @@ function addConsole(source, text, stream = 'combined', flush = true) {
 }
 
 function state() {
-  const lifecycle = deployProcess ? 'deploying' : serverPhase;
+  const lifecycle = deployProcess ? 'deploying' : scheduledRestartTimer ? 'restart-pending' : serverPhase;
   return {
     server: lifecycle,
-    deployment: deployProcess ? 'running' : 'idle',
+    deployment: deployProcess ? 'running' : scheduledRestartTimer ? 'countdown' : 'idle',
+    scheduledRestartAt,
     startedAt: serverStartedAt,
     lastExit,
     deployedMrs,
@@ -336,6 +359,7 @@ function javaEnvironment() {
 function startServer(actor) {
   if (serverProcess) throw new Error('The server is already running.');
   if (deployProcess) throw new Error('Wait for the MR deployment to finish.');
+  if (scheduledRestartTimer) throw new Error('Wait for the automatic restart countdown to finish.');
 
   const mavenWrapper = path.join(serverRoot, 'Server', isWindows ? 'mvnw.cmd' : 'mvnw');
   if (!fs.existsSync(mavenWrapper)) throw new Error(`The Maven wrapper was not found: ${mavenWrapper}`);
@@ -388,6 +412,7 @@ function stopServer(actor, afterStop = null) {
 function deployCurrentTest(actor, afterDeploy = null) {
   if (deployProcess) throw new Error('An MR deployment is already running.');
   if (serverProcess) throw new Error('Stop the server before rebuilding the MR stack.');
+  if (scheduledRestartTimer) throw new Error('Wait for the automatic restart countdown to finish.');
 
   const script = path.join(portalRoot, 'scripts', 'deploy_current_test.py');
   const mode = selectedDeployMode();
@@ -418,6 +443,7 @@ function deployCurrentTest(actor, afterDeploy = null) {
 
 function redeployAndRestart(actor) {
   if (deployProcess) throw new Error('An MR deployment is already running.');
+  if (scheduledRestartTimer) throw new Error('An automatic restart countdown is already running.');
 
   const beginDeployment = () => {
     try {
@@ -445,6 +471,33 @@ function redeployAndRestart(actor) {
   } else {
     beginDeployment();
   }
+}
+
+function beginScheduledRestart(actor, countdownMinutes = 5) {
+  if (deployProcess) throw new Error('An MR deployment is already running.');
+  if (scheduledRestartTimer) throw new Error('An automatic restart countdown is already running.');
+  if (!serverProcess) {
+    addConsole('portal', 'The game server is offline; starting the scheduled deployment immediately.');
+    redeployAndRestart(actor);
+    return;
+  }
+  if (!serverProcess.stdin?.writable) throw new Error('The game server console is unavailable.');
+
+  const command = `update ${countdownMinutes}`;
+  serverProcess.stdin.write(`${command}\r\n`);
+  addConsole('admin', `> ${command} (automatic schedule)`);
+  scheduledRestartAt = new Date(Date.now() + countdownMinutes * 60 * 1000).toISOString();
+  audit(actor, 'schedule.countdown', `command=${command}; restartAt=${scheduledRestartAt}`);
+  addConsole('portal', `In-game update countdown started. Redeployment begins in ${countdownMinutes} minutes.`);
+  scheduledRestartTimer = setTimeout(() => {
+    scheduledRestartTimer = null;
+    scheduledRestartAt = null;
+    broadcastState();
+    try { redeployAndRestart(actor); }
+    catch (error) { addConsole('portal', `Scheduled redeployment could not start after countdown: ${error.message}`); }
+  }, countdownMinutes * 60 * 1000);
+  scheduledRestartTimer.unref();
+  broadcastState();
 }
 
 function requireAdmin(req, res, next) {
@@ -486,6 +539,11 @@ app.get('/settings', (req, res) => {
 app.get('/audit', (req, res) => {
   if (!req.session.user || req.session.user.provider !== 'local') return res.redirect('/');
   res.sendFile(path.join(portalRoot, 'public', 'audit.html'));
+});
+
+app.get('/world-config', (req, res) => {
+  if (!req.session.user || req.session.user.provider !== 'local') return res.redirect('/');
+  res.sendFile(path.join(portalRoot, 'public', 'world-config.html'));
 });
 
 app.post('/auth/local', (req, res) => {
@@ -592,6 +650,55 @@ app.get('/api/audit', requireLocalAdmin, (req, res) => {
     res.json({ entries });
   } catch (error) {
     res.status(500).json({ error: `Could not read the audit log: ${error.message}` });
+  }
+});
+
+app.get('/api/world-config', requireLocalAdmin, (req, res) => {
+  try {
+    if (!fs.existsSync(worldConfigPath)) {
+      return res.status(404).json({ error: `World configuration was not found: ${worldConfigPath}` });
+    }
+    res.json({
+      content: fs.readFileSync(worldConfigPath, 'utf8'),
+      path: worldConfigPath,
+      serverRunning: Boolean(serverProcess),
+    });
+  } catch (error) {
+    res.status(500).json({ error: `Could not read default.conf: ${error.message}` });
+  }
+});
+
+app.put('/api/world-config', requireLocalAdmin, (req, res) => {
+  try {
+    if (typeof req.body.content !== 'string') return res.status(400).json({ error: 'Configuration text is required.' });
+    if (Buffer.byteLength(req.body.content, 'utf8') > 512 * 1024) return res.status(413).json({ error: 'Configuration exceeds the 512 KB limit.' });
+    if (req.body.content.includes('\0')) return res.status(400).json({ error: 'Configuration contains an invalid null character.' });
+    if (!fs.existsSync(worldConfigPath)) return res.status(404).json({ error: `World configuration was not found: ${worldConfigPath}` });
+
+    const previous = fs.readFileSync(worldConfigPath, 'utf8');
+    const backupPath = `${worldConfigPath}.backup`;
+    const temporaryPath = `${worldConfigPath}.09test-tmp`;
+    const mode = fs.statSync(worldConfigPath).mode;
+    fs.copyFileSync(worldConfigPath, backupPath);
+    fs.writeFileSync(temporaryPath, req.body.content, { encoding: 'utf8', mode });
+    try {
+      fs.renameSync(temporaryPath, worldConfigPath);
+    } catch (error) {
+      if (!isWindows) throw error;
+      fs.unlinkSync(worldConfigPath);
+      try { fs.renameSync(temporaryPath, worldConfigPath); }
+      catch (renameError) {
+        fs.copyFileSync(backupPath, worldConfigPath);
+        throw renameError;
+      }
+    }
+
+    const digest = (value) => crypto.createHash('sha256').update(value).digest('hex').slice(0, 12);
+    audit(userLabel(req), 'world-config.update', `default.conf; ${Buffer.byteLength(previous)} -> ${Buffer.byteLength(req.body.content)} bytes; sha256 ${digest(previous)} -> ${digest(req.body.content)}`);
+    res.json({ ok: true, serverRunning: Boolean(serverProcess), backupPath });
+  } catch (error) {
+    try { fs.unlinkSync(`${worldConfigPath}.09test-tmp`); } catch {}
+    res.status(500).json({ error: `Could not save default.conf: ${error.message}` });
   }
 });
 
@@ -760,7 +867,7 @@ function checkRedeploySchedule() {
       return;
     }
     if (now < next) return;
-    redeployAndRestart('interval-scheduler');
+    beginScheduledRestart('interval-scheduler', 5);
     settings.lastScheduledAt = now.toISOString();
     const intervalMs = settings.redeployIntervalHours * 60 * 60 * 1000;
     do { next = new Date(next.getTime() + intervalMs); } while (next <= now);

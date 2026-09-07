@@ -41,7 +41,7 @@ async function loadLogs() {
   } else {
     logElement.textContent = 'No server logs have been recorded yet.';
   }
-  statusElement.textContent = result.state.server === 'online' ? 'Server online' : 'Server offline';
+  statusElement.textContent = result.state.server === 'online' ? 'Server online' : result.state.server === 'restart-pending' ? 'Restart pending' : `Server ${result.state.server}`;
   logElement.scrollTop = logElement.scrollHeight;
 }
 
@@ -57,7 +57,7 @@ socket.on('console-line', (entry) => {
   logElement.scrollTop = logElement.scrollHeight;
 });
 socket.on('state', (state) => {
-  statusElement.textContent = state.server === 'online' ? 'Server online' : 'Server offline';
+  statusElement.textContent = state.server === 'online' ? 'Server online' : state.server === 'restart-pending' ? 'Restart pending' : `Server ${state.server}`;
 });
 
 loadLogs().catch((error) => { logElement.textContent = error.message; });

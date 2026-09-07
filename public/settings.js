@@ -4,6 +4,7 @@ let canEdit = false;
 
 function applyAccess() {
   for (const control of form.querySelectorAll('input, select, button')) control.disabled = !canEdit;
+  document.querySelector('#edit-world-config').hidden = !canEdit;
   document.querySelector('#settings-access').textContent = canEdit ? 'Local administrator' : 'View only';
   document.querySelector('#settings-note').textContent = canEdit
     ? 'Changes are saved locally on this server.'

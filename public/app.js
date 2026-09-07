@@ -2,6 +2,20 @@ const consoleElement = document.querySelector('#console');
 const messageElement = document.querySelector('#action-message');
 let currentState = null;
 
+function restartCountdown(state) {
+  if (state?.server !== 'restart-pending' || !state.scheduledRestartAt) return null;
+  const seconds = Math.max(0, Math.ceil((new Date(state.scheduledRestartAt).getTime() - Date.now()) / 1000));
+  if (seconds === 0) return '00:00';
+  return `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`;
+}
+
+function refreshRestartCountdown() {
+  const remaining = restartCountdown(currentState);
+  if (remaining === null) return;
+  document.querySelector('#server-status').textContent = `Restart Pending · ${remaining}`;
+  document.querySelector('#deployment-status').textContent = `Update restart in ${remaining}`;
+}
+
 function isExceptionLine(message) {
   return /(?:^|\s)(?:Exception in thread|Caused by:|Suppressed:|[\w.$]+(?:Exception|Error):|FATAL\b|ERROR\b)/i.test(message)
     || /^\s*at\s+[\w.$/<>]+\([^)]*\)\s*$/.test(message)
@@ -203,21 +217,24 @@ function appendLine(entry) {
 function renderState(state) {
   currentState = state;
   const online = state.server === 'online';
-  const serverBusy = ['compiling', 'starting', 'stopping'].includes(state.server);
-  const deploying = state.deployment === 'running';
-  const labels = { offline: 'Offline', deploying: 'Deploying', compiling: 'Compiling', starting: 'Starting', online: 'Online', stopping: 'Stopping' };
+  const serverBusy = ['compiling', 'starting', 'stopping', 'restart-pending'].includes(state.server);
+  const deploying = state.deployment !== 'idle';
+  const labels = { offline: 'Offline', deploying: 'Deploying', compiling: 'Compiling', starting: 'Starting', online: 'Online', stopping: 'Stopping', 'restart-pending': 'Restart Pending' };
   document.querySelector('#server-status').textContent = labels[state.server] || 'Offline';
   const statusDot = document.querySelector('#status-dot');
   statusDot.className = `status-dot ${state.server || 'offline'}`;
-  document.querySelector('#deployment-status').textContent = deploying ? 'Deployment running' : 'Deployment idle';
+  document.querySelector('#deployment-status').textContent = state.deployment === 'countdown' ? '5-minute update countdown' : deploying ? 'Deployment running' : 'Deployment idle';
   document.querySelector('#deploy-button').disabled = deploying || online || serverBusy;
   document.querySelector('#start-button').disabled = online || deploying || serverBusy;
-  document.querySelector('#stop-button').disabled = !online && !serverBusy;
-  document.querySelector('#command').disabled = !online;
+  document.querySelector('#stop-button').disabled = !online && state.server !== 'restart-pending' && !serverBusy;
+  document.querySelector('#command').disabled = !online && state.server !== 'restart-pending';
   document.querySelector('#branch-url').disabled = deploying || online || serverBusy;
   document.querySelector('#branch-form button').disabled = deploying || online || serverBusy;
   renderMrs(state.deployedMrs, state.manualBranches);
+  refreshRestartCountdown();
 }
+
+setInterval(refreshRestartCountdown, 1000);
 
 async function action(url, body, method = 'POST') {
   messageElement.textContent = '';
