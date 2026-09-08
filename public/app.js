@@ -1,6 +1,7 @@
 const consoleElement = document.querySelector('#console');
 const messageElement = document.querySelector('#action-message');
 let currentState = null;
+let socket = null;
 
 function restartCountdown(state) {
   if (state?.server !== 'restart-pending' || !state.scheduledRestartAt) return null;
@@ -288,7 +289,7 @@ document.querySelector('#command-form').addEventListener('submit', async (event)
 
 fetch('/api/bootstrap').then((response) => {
   if (response.status === 401) {
-    location.replace('/');
+    location.replace('/auth/session-ended');
     return null;
   }
   if (!response.ok) throw new Error(`Could not load the portal (${response.status}).`);
@@ -298,15 +299,23 @@ fetch('/api/bootstrap').then((response) => {
   document.querySelector('#account-name').textContent = data.user.name;
   data.console.forEach(appendLine);
   renderState(data.state);
-  const socket = io({ reconnection: true });
+  socket = io({ reconnection: true, reconnectionAttempts: 5 });
   socket.on('console-line', appendLine);
   socket.on('state', renderState);
   socket.on('connect_error', (error) => {
     if (error?.message === 'Authentication required.') {
       socket.disconnect();
-      location.replace('/');
+      location.replace('/auth/session-ended');
     }
   });
 }).catch((error) => {
   messageElement.textContent = error.message;
+});
+
+document.querySelector('form[action="/auth/logout"]')?.addEventListener('submit', () => {
+  if (socket) {
+    socket.removeAllListeners();
+    socket.disconnect();
+    socket = null;
+  }
 });

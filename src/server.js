@@ -555,7 +555,14 @@ function safeEqual(actual, expected) {
   return left.length === right.length && crypto.timingSafeEqual(left, right);
 }
 
-app.use('/assets', express.static(path.join(portalRoot, 'public'), { index: false }));
+app.use('/assets', express.static(path.join(portalRoot, 'public'), {
+  index: false,
+  setHeaders(res, filePath) {
+    if (/\.(?:js|html)$/i.test(filePath)) {
+      res.setHeader('Cache-Control', 'no-store');
+    }
+  },
+}));
 
 app.get('/', (req, res) => {
   if (!req.session.user) return res.sendFile(path.join(portalRoot, 'public', 'login.html'));
@@ -658,6 +665,11 @@ app.post('/auth/logout', (req, res) => {
     audit(actor, 'auth.logout');
     res.redirect('/');
   });
+});
+
+app.get('/auth/session-ended', (req, res) => {
+  if (!req.session) return res.redirect('/');
+  req.session.destroy(() => res.redirect('/'));
 });
 
 app.get('/api/bootstrap', requireAdmin, (req, res) => {
