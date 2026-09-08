@@ -13,7 +13,6 @@ function refreshRestartCountdown() {
   const remaining = restartCountdown(currentState);
   if (remaining === null) return;
   document.querySelector('#server-status').textContent = `Restart Pending · ${remaining}`;
-  document.querySelector('#deployment-status').textContent = `Update restart in ${remaining}`;
 }
 
 function isExceptionLine(message) {
@@ -223,10 +222,15 @@ function renderState(state) {
   document.querySelector('#server-status').textContent = labels[state.server] || 'Offline';
   const statusDot = document.querySelector('#status-dot');
   statusDot.className = `status-dot ${state.server || 'offline'}`;
-  document.querySelector('#deployment-status').textContent = state.deployment === 'countdown' ? '5-minute update countdown' : deploying ? 'Deployment running' : 'Deployment idle';
   document.querySelector('#deploy-button').disabled = deploying || online || serverBusy;
-  document.querySelector('#start-button').disabled = online || deploying || serverBusy;
-  document.querySelector('#stop-button').disabled = !online && state.server !== 'restart-pending' && !serverBusy;
+  document.querySelector('#rebuild-button').disabled = deploying || !['online', 'offline'].includes(state.server);
+  document.querySelector('#run-all-button').disabled = deploying || !['online', 'offline'].includes(state.server);
+  const toggleButton = document.querySelector('#server-toggle-button');
+  const canStop = ['online', 'compiling', 'starting', 'restart-pending'].includes(state.server);
+  toggleButton.textContent = state.server === 'stopping' ? 'Stopping…' : canStop ? 'Stop server' : 'Start server';
+  toggleButton.classList.toggle('danger', canStop || state.server === 'stopping');
+  toggleButton.classList.toggle('secondary', !canStop && state.server !== 'stopping');
+  toggleButton.disabled = deploying || state.server === 'stopping';
   document.querySelector('#command').disabled = !online && state.server !== 'restart-pending';
   document.querySelector('#branch-url').disabled = deploying || online || serverBusy;
   document.querySelector('#branch-form button').disabled = deploying || online || serverBusy;
@@ -256,8 +260,15 @@ async function action(url, body, method = 'POST') {
 }
 
 document.querySelector('#deploy-button').addEventListener('click', () => action('/api/deployment/run').catch((e) => { messageElement.textContent = e.message; }));
-document.querySelector('#start-button').addEventListener('click', () => action('/api/server/start').catch((e) => { messageElement.textContent = e.message; }));
-document.querySelector('#stop-button').addEventListener('click', () => action('/api/server/stop').catch((e) => { messageElement.textContent = e.message; }));
+document.querySelector('#rebuild-button').addEventListener('click', () => action('/api/server/rebuild').catch((e) => { messageElement.textContent = e.message; }));
+document.querySelector('#run-all-button').addEventListener('click', () => {
+  if (!window.confirm('Run the full update workflow? An online server will receive a five-minute update countdown first.')) return;
+  action('/api/server/run-all').catch((e) => { messageElement.textContent = e.message; });
+});
+document.querySelector('#server-toggle-button').addEventListener('click', () => {
+  const shouldStop = ['online', 'compiling', 'starting', 'restart-pending'].includes(currentState?.server);
+  action(shouldStop ? '/api/server/stop' : '/api/server/start').catch((e) => { messageElement.textContent = e.message; });
+});
 document.querySelector('#branch-form').addEventListener('submit', async (event) => {
   event.preventDefault();
   const input = document.querySelector('#branch-url');

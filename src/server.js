@@ -366,31 +366,38 @@ function javaEnvironment() {
   return { ...process.env, JAVA_HOME: javaHome };
 }
 
-function startServer(actor) {
+function startServer(actor, rebuild = false) {
   if (serverProcess) throw new Error('The server is already running.');
   if (deployProcess) throw new Error('Wait for the MR deployment to finish.');
   if (scheduledRestartTimer) throw new Error('Wait for the automatic restart countdown to finish.');
 
   const mavenWrapper = path.join(serverRoot, 'Server', isWindows ? 'mvnw.cmd' : 'mvnw');
-  if (!fs.existsSync(mavenWrapper)) throw new Error(`The Maven wrapper was not found: ${mavenWrapper}`);
+  const serverJar = path.join(serverRoot, 'Server', 'server.jar');
+  if (rebuild && !fs.existsSync(mavenWrapper)) throw new Error(`The Maven wrapper was not found: ${mavenWrapper}`);
+  if (!rebuild && !fs.existsSync(serverJar)) throw new Error('server.jar does not exist yet. Use Rebuild first.');
   ensureWorldConfig();
   maintainServerLogs();
   fs.appendFileSync(serverLogPath, `\n${new Date().toISOString()}\t===== SERVER START =====\n`, 'utf8');
   const executable = isWindows ? 'cmd.exe' : 'bash';
+  const worldConfigLaunchPath = path.relative(path.join(serverRoot, 'Server'), worldConfigPath);
   const launchArgs = isWindows
-    ? ['/d', '/s', '/c', 'cd /d Server && call mvnw.cmd clean package -DskipTests && xcopy /Y target\*-with-dependencies.jar server.jar* >nul && echo __09TEST_STARTING__ && java -jar server.jar "%PORTAL_WORLD_CONFIG%"']
-    : ['-lc', 'cd Server && ./mvnw clean package -DskipTests && cp target/*-with-dependencies.jar server.jar && echo __09TEST_STARTING__ && exec java -jar server.jar "$PORTAL_WORLD_CONFIG"'];
-  serverPhase = 'compiling';
+    ? ['/d', '/s', '/c', rebuild
+      ? 'cd /d Server && call mvnw.cmd clean package -DskipTests && xcopy /Y target\*-with-dependencies.jar server.jar* >nul && echo __09TEST_STARTING__ && java -jar server.jar %PORTAL_WORLD_CONFIG%'
+      : 'cd /d Server && java -jar server.jar %PORTAL_WORLD_CONFIG%']
+    : ['-lc', rebuild
+      ? 'cd Server && ./mvnw clean package -DskipTests && cp target/*-with-dependencies.jar server.jar && echo __09TEST_STARTING__ && exec java -jar server.jar "$PORTAL_WORLD_CONFIG"'
+      : 'cd Server && exec java -jar server.jar "$PORTAL_WORLD_CONFIG"'];
+  serverPhase = rebuild ? 'compiling' : 'starting';
   serverProcess = spawn(executable, launchArgs, {
     cwd: serverRoot,
-    env: { ...javaEnvironment(), PORTAL_WORLD_CONFIG: worldConfigPath },
+    env: { ...javaEnvironment(), PORTAL_WORLD_CONFIG: worldConfigLaunchPath },
     windowsHide: true,
     stdio: ['pipe', 'pipe', 'pipe'],
   });
   serverStartedAt = new Date().toISOString();
   lastExit = null;
   fs.writeFileSync(serverPidPath, String(serverProcess.pid), 'utf8');
-  audit(actor, 'server.start');
+  audit(actor, 'server.start', rebuild ? 'clean rebuild' : 'existing server.jar');
   attachProcess(serverProcess, 'server', (code, signal) => {
     lastExit = { code, signal, at: new Date().toISOString() };
     serverProcess = null;
@@ -418,6 +425,19 @@ function stopServer(actor, afterStop = null) {
   } else {
     serverProcess.kill('SIGTERM');
   }
+}
+
+function rebuildServer(actor) {
+  if (deployProcess) throw new Error('Wait for the MR deployment to finish.');
+  if (scheduledRestartTimer) throw new Error('Wait for the automatic restart countdown to finish.');
+  const beginBuild = () => {
+    try { startServer(actor, true); }
+    catch (error) { addConsole('portal', `Rebuild could not start: ${error.message}`); }
+  };
+  audit(actor, 'server.rebuild');
+  addConsole('portal', 'Rebuilding the current server stack with a clean compilation...');
+  if (serverProcess) stopServer(actor, beginBuild);
+  else beginBuild();
 }
 
 function deployCurrentTest(actor, afterDeploy = null) {
@@ -466,7 +486,7 @@ function redeployAndRestart(actor) {
         }
         try {
           addConsole('portal', 'Deployment succeeded; compiling and starting the game server...');
-          startServer(actor);
+          startServer(actor, true);
         } catch (error) {
           addConsole('portal', `Scheduled server start failed: ${error.message}`);
         }
@@ -776,6 +796,21 @@ app.post('/api/server/start', requireAdmin, (req, res) => {
 app.post('/api/server/stop', requireAdmin, (req, res) => {
   try { stopServer(userLabel(req)); res.status(202).json(state()); }
   catch (error) { res.status(409).json({ error: error.message }); }
+});
+
+app.post('/api/server/rebuild', requireAdmin, (req, res) => {
+  try { rebuildServer(userLabel(req)); res.status(202).json(state()); }
+  catch (error) { res.status(409).json({ error: error.message }); }
+});
+
+app.post('/api/server/run-all', requireAdmin, (req, res) => {
+  try {
+    audit(userLabel(req), 'server.run-all');
+    beginScheduledRestart(userLabel(req), 5);
+    res.status(202).json(state());
+  } catch (error) {
+    res.status(409).json({ error: error.message });
+  }
 });
 
 app.post('/api/deployment/run', requireAdmin, (req, res) => {

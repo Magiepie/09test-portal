@@ -49,15 +49,4 @@ document.querySelector('#refresh-logs').addEventListener('click', () => {
   loadLogs().catch((error) => { logElement.textContent = error.message; });
 });
 
-const socket = io();
-socket.on('console-line', (entry) => {
-  if (entry.source !== 'server') return;
-  if (logElement.textContent === 'No server logs have been recorded yet.') logElement.textContent = '';
-  appendLogLine(`${entry.at}\t${entry.line}`);
-  logElement.scrollTop = logElement.scrollHeight;
-});
-socket.on('state', (state) => {
-  statusElement.textContent = state.server === 'online' ? 'Server online' : state.server === 'restart-pending' ? 'Restart pending' : `Server ${state.server}`;
-});
-
 loadLogs().catch((error) => { logElement.textContent = error.message; });

@@ -17,9 +17,9 @@
       <div class="server-workspace">
         <section class="controls" aria-label="Server controls">
           <button id="deploy-button" class="button primary">Get Test Deploys</button>
-          <button id="start-button" class="button secondary">Start server</button>
-          <button id="stop-button" class="button danger">Stop server</button>
-          <a class="button secondary" href="/logs" target="_blank" rel="noopener">View Logs</a>
+          <button id="rebuild-button" class="button secondary">Rebuild</button>
+          <button id="server-toggle-button" class="button secondary">Start server</button>
+          <button id="run-all-button" class="button secondary">Run All</button>
           <p id="action-message" role="status"></p>
           <div class="status-card control-status">
             <span id="status-dot" class="status-dot"></span>
@@ -30,7 +30,7 @@
         <section class="console-card">
           <div class="console-header">
             <div><h2>Console</h2></div>
-            <span id="deployment-status" class="pill">Deployment idle</span>
+            <a class="button secondary compact-button" href="/logs" target="_blank" rel="noopener">View Logs</a>
           </div>
           <div id="console" class="console" role="log" aria-live="polite"></div>
           <form id="command-form" class="command-bar">
