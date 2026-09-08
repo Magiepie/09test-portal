@@ -199,7 +199,7 @@ function appendLine(entry) {
   const importantMavenWarning = /\b(?:exception|error|fatal|fail(?:ed|ure)?)\b/i.test(message);
   if (mavenWarning && !importantMavenWarning) return;
   if (entry.source === 'server') {
-    message = message.replace(/^\[\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{4}\]:\s*/, '');
+    message = message.replace(/^\[\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:Z|[+-]\d{4})\]:\s*/, '');
     source = '';
   }
   if (message.includes('[PulseRunner]') || message.includes('[TimerRegistry]')) row.classList.add('console-pulse-runner');

@@ -2,7 +2,13 @@ const logElement = document.querySelector('#server-log');
 const statusElement = document.querySelector('#log-status');
 
 function cleanServerLine(line) {
-  return line.replace(/^\[\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{4}\]:\s*/, '');
+  return line.replace(/^\[\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:Z|[+-]\d{4})\]:\s*/, '');
+}
+
+function displayTime(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return [date.getHours(), date.getMinutes(), date.getSeconds()].map((part) => String(part).padStart(2, '0')).join(':');
 }
 
 function isExceptionLine(message) {
@@ -18,7 +24,7 @@ function appendLogLine(text) {
   row.className = 'console-line';
   const separator = text.indexOf('\t');
   const message = cleanServerLine(separator >= 0 ? text.slice(separator + 1) : text);
-  const prefix = separator >= 0 ? `${text.slice(0, separator)}\t` : '';
+  const prefix = separator >= 0 ? `${displayTime(text.slice(0, separator))}  ` : '';
   if (message.includes('[PulseRunner]') || message.includes('[TimerRegistry]')) row.classList.add('console-pulse-runner');
   if (message.includes('[SystemTermination]')
       || message.includes('[SystemShutdownHook]')
