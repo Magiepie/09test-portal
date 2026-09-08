@@ -79,6 +79,15 @@ app.use(express.urlencoded({ extended: false }));
 app.use(express.json({ limit: '16kb' }));
 app.use(sessionMiddleware);
 
+app.use((req, res, next) => {
+  if (req.method === 'GET' && (req.path === '/' || req.path === '/login')) {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+  }
+  next();
+});
+
 const consoleBuffer = [];
 const MAX_CONSOLE_LINES = 2000;
 const MAX_SERVER_LOG_BYTES = 5 * 1024 * 1024;
@@ -565,8 +574,12 @@ app.use('/assets', express.static(path.join(portalRoot, 'public'), {
 }));
 
 app.get('/', (req, res) => {
-  if (!req.session.user) return res.sendFile(path.join(portalRoot, 'public', 'login.html'));
+  if (!req.session.user) return res.redirect('/login');
   res.sendFile(path.join(portalRoot, 'public', 'index.html'));
+});
+
+app.get('/login', (req, res) => {
+  res.sendFile(path.join(portalRoot, 'public', 'login.html'));
 });
 
 app.get('/logs', (req, res) => {
@@ -662,14 +675,20 @@ app.get('/auth/discord/callback', async (req, res) => {
 app.post('/auth/logout', (req, res) => {
   const actor = userLabel(req);
   req.session.destroy(() => {
+    res.clearCookie('09test.sid', { path: '/' });
     audit(actor, 'auth.logout');
-    res.redirect('/');
+    res.redirect('/login');
   });
 });
 
 app.get('/auth/session-ended', (req, res) => {
-  if (!req.session) return res.redirect('/');
-  req.session.destroy(() => res.redirect('/'));
+  res.setHeader('Cache-Control', 'no-store');
+  const finish = () => {
+    res.clearCookie('09test.sid', { path: '/' });
+    res.redirect('/login');
+  };
+  if (!req.session) return finish();
+  req.session.destroy(finish);
 });
 
 app.get('/api/bootstrap', requireAdmin, (req, res) => {
