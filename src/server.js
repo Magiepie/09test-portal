@@ -30,7 +30,8 @@ const droppedMrsPath = path.join(dataDir, 'dropped_mrs.json');
 const manualBranchesPath = path.join(dataDir, 'manual_branches.json');
 const settingsPath = path.join(dataDir, 'settings.json');
 const serverLogPath = path.join(dataDir, 'server.log');
-const worldConfigPath = path.join(serverRoot, 'Server', 'worldprops', 'default.conf');
+const defaultWorldConfigPath = path.join(serverRoot, 'Server', 'worldprops', 'default.conf');
+const worldConfigPath = path.join(dataDir, '09test.conf');
 const port = Number(process.env.PORT || 24247);
 const host = process.env.HOST || '127.0.0.1';
 const sessionSecret = process.env.SESSION_SECRET || '';
@@ -163,6 +164,15 @@ function readSettings() {
 
 function writeSettings(settings) {
   fs.writeFileSync(settingsPath, `${JSON.stringify(settings, null, 2)}\n`, 'utf8');
+}
+
+function ensureWorldConfig() {
+  if (fs.existsSync(worldConfigPath)) return;
+  if (!fs.existsSync(defaultWorldConfigPath)) {
+    throw new Error(`Default world configuration was not found: ${defaultWorldConfigPath}`);
+  }
+  fs.copyFileSync(defaultWorldConfigPath, worldConfigPath, fs.constants.COPYFILE_EXCL);
+  audit('system', 'world-config.create', 'Created portal data/09test.conf from the server default.conf');
 }
 
 function nextIntervalOccurrence(time, intervalHours, now = new Date()) {
@@ -363,16 +373,17 @@ function startServer(actor) {
 
   const mavenWrapper = path.join(serverRoot, 'Server', isWindows ? 'mvnw.cmd' : 'mvnw');
   if (!fs.existsSync(mavenWrapper)) throw new Error(`The Maven wrapper was not found: ${mavenWrapper}`);
+  ensureWorldConfig();
   maintainServerLogs();
   fs.appendFileSync(serverLogPath, `\n${new Date().toISOString()}\t===== SERVER START =====\n`, 'utf8');
   const executable = isWindows ? 'cmd.exe' : 'bash';
   const launchArgs = isWindows
-    ? ['/d', '/s', '/c', 'cd /d Server && call mvnw.cmd clean package -DskipTests && xcopy /Y target\*-with-dependencies.jar server.jar* >nul && echo __09TEST_STARTING__ && java -jar server.jar']
-    : ['-lc', 'cd Server && ./mvnw clean package -DskipTests && cp target/*-with-dependencies.jar server.jar && echo __09TEST_STARTING__ && exec java -jar server.jar'];
+    ? ['/d', '/s', '/c', 'cd /d Server && call mvnw.cmd clean package -DskipTests && xcopy /Y target\*-with-dependencies.jar server.jar* >nul && echo __09TEST_STARTING__ && java -jar server.jar "%PORTAL_WORLD_CONFIG%"']
+    : ['-lc', 'cd Server && ./mvnw clean package -DskipTests && cp target/*-with-dependencies.jar server.jar && echo __09TEST_STARTING__ && exec java -jar server.jar "$PORTAL_WORLD_CONFIG"'];
   serverPhase = 'compiling';
   serverProcess = spawn(executable, launchArgs, {
     cwd: serverRoot,
-    env: javaEnvironment(),
+    env: { ...javaEnvironment(), PORTAL_WORLD_CONFIG: worldConfigPath },
     windowsHide: true,
     stdio: ['pipe', 'pipe', 'pipe'],
   });
@@ -655,9 +666,7 @@ app.get('/api/audit', requireLocalAdmin, (req, res) => {
 
 app.get('/api/world-config', requireLocalAdmin, (req, res) => {
   try {
-    if (!fs.existsSync(worldConfigPath)) {
-      return res.status(404).json({ error: `World configuration was not found: ${worldConfigPath}` });
-    }
+    ensureWorldConfig();
     res.json({
       content: fs.readFileSync(worldConfigPath, 'utf8'),
       path: worldConfigPath,
@@ -673,7 +682,7 @@ app.put('/api/world-config', requireLocalAdmin, (req, res) => {
     if (typeof req.body.content !== 'string') return res.status(400).json({ error: 'Configuration text is required.' });
     if (Buffer.byteLength(req.body.content, 'utf8') > 512 * 1024) return res.status(413).json({ error: 'Configuration exceeds the 512 KB limit.' });
     if (req.body.content.includes('\0')) return res.status(400).json({ error: 'Configuration contains an invalid null character.' });
-    if (!fs.existsSync(worldConfigPath)) return res.status(404).json({ error: `World configuration was not found: ${worldConfigPath}` });
+    ensureWorldConfig();
 
     const previous = fs.readFileSync(worldConfigPath, 'utf8');
     const backupPath = `${worldConfigPath}.backup`;
@@ -694,11 +703,11 @@ app.put('/api/world-config', requireLocalAdmin, (req, res) => {
     }
 
     const digest = (value) => crypto.createHash('sha256').update(value).digest('hex').slice(0, 12);
-    audit(userLabel(req), 'world-config.update', `default.conf; ${Buffer.byteLength(previous)} -> ${Buffer.byteLength(req.body.content)} bytes; sha256 ${digest(previous)} -> ${digest(req.body.content)}`);
+    audit(userLabel(req), 'world-config.update', `09test.conf; ${Buffer.byteLength(previous)} -> ${Buffer.byteLength(req.body.content)} bytes; sha256 ${digest(previous)} -> ${digest(req.body.content)}`);
     res.json({ ok: true, serverRunning: Boolean(serverProcess), backupPath });
   } catch (error) {
     try { fs.unlinkSync(`${worldConfigPath}.09test-tmp`); } catch {}
-    res.status(500).json({ error: `Could not save default.conf: ${error.message}` });
+    res.status(500).json({ error: `Could not save 09test.conf: ${error.message}` });
   }
 });
 

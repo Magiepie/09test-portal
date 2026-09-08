@@ -33,7 +33,7 @@ async function loadConfig() {
   const response = await fetch('/api/world-config');
   if (response.status === 401 || response.status === 403) return location.assign('/');
   const result = await response.json();
-  if (!response.ok) throw new Error(result.error || 'Could not load default.conf.');
+  if (!response.ok) throw new Error(result.error || 'Could not load 09test.conf.');
   savedContent = result.content;
   editor.value = result.content;
   document.querySelector('#config-path').textContent = result.path;
@@ -56,7 +56,7 @@ saveButton.addEventListener('click', async () => {
     message.textContent = 'No changes to save.';
     return;
   }
-  if (!window.confirm('Save changes to Server/worldprops/default.conf?')) return;
+  if (!window.confirm('Save changes to the portal-owned data/09test.conf?')) return;
   saveButton.disabled = true;
   message.textContent = 'Saving…';
   try {
@@ -66,7 +66,7 @@ saveButton.addEventListener('click', async () => {
       body: JSON.stringify({ content: editor.value }),
     });
     const result = await response.json();
-    if (!response.ok) throw new Error(result.error || 'Could not save default.conf.');
+    if (!response.ok) throw new Error(result.error || 'Could not save 09test.conf.');
     savedContent = editor.value;
     message.textContent = result.serverRunning
       ? 'Saved. Restart the game server to apply these changes.'
