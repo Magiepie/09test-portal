@@ -899,8 +899,11 @@ app.post('/api/console', requireAdmin, (req, res) => {
 });
 
 io.engine.use(sessionMiddleware);
+io.use((socket, next) => {
+  if (!socket.request.session?.user) return next(new Error('Authentication required.'));
+  next();
+});
 io.on('connection', (socket) => {
-  if (!socket.request.session?.user) return socket.disconnect(true);
   socket.join('admins');
   socket.emit('state', state());
 });

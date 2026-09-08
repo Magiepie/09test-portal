@@ -287,15 +287,26 @@ document.querySelector('#command-form').addEventListener('submit', async (event)
 });
 
 fetch('/api/bootstrap').then((response) => {
-  if (response.status === 401) return location.reload();
+  if (response.status === 401) {
+    location.replace('/');
+    return null;
+  }
+  if (!response.ok) throw new Error(`Could not load the portal (${response.status}).`);
   return response.json();
 }).then((data) => {
   if (!data) return;
   document.querySelector('#account-name').textContent = data.user.name;
   data.console.forEach(appendLine);
   renderState(data.state);
+  const socket = io({ reconnection: true });
+  socket.on('console-line', appendLine);
+  socket.on('state', renderState);
+  socket.on('connect_error', (error) => {
+    if (error?.message === 'Authentication required.') {
+      socket.disconnect();
+      location.replace('/');
+    }
+  });
+}).catch((error) => {
+  messageElement.textContent = error.message;
 });
-
-const socket = io();
-socket.on('console-line', appendLine);
-socket.on('state', renderState);
