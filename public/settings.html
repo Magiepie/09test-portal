@@ -26,6 +26,10 @@
           <option value="mk2">mk2 — deeper checks</option>
         </select>
 
+        <label for="server-memory">Maximum server memory (MB)</label>
+        <input id="server-memory" name="serverMemoryMb" type="number" min="512" max="65536" step="256" required>
+        <p class="muted settings-small">Applied as Java's maximum heap size on the next Start, Rebuild, or automatic deployment.</p>
+
         <label class="check-row" for="daily-enabled">
           <input id="daily-enabled" name="dailyRedeployEnabled" type="checkbox">
           <span><strong>Automatic redeploy and restart</strong><small>Stop server, deploy the latest stack, clean compile, then start.</small></span>

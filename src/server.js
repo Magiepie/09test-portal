@@ -150,6 +150,7 @@ function writeManualBranches(branches) {
 function readSettings() {
   const defaults = {
     deployMode: String(process.env.DEPLOY_MODE || 'classic').toLowerCase() === 'mk2' ? 'mk2' : 'classic',
+    serverMemoryMb: 4096,
     dailyRedeployEnabled: false,
     dailyRedeployTime: '04:00',
     redeployIntervalHours: 4,
@@ -380,24 +381,28 @@ function startServer(actor, rebuild = false) {
   fs.appendFileSync(serverLogPath, `\n${new Date().toISOString()}\t===== SERVER START =====\n`, 'utf8');
   const executable = isWindows ? 'cmd.exe' : 'bash';
   const worldConfigLaunchPath = path.relative(path.join(serverRoot, 'Server'), worldConfigPath);
+  const configuredMemoryMb = Number(readSettings().serverMemoryMb);
+  const serverMemoryMb = Number.isInteger(configuredMemoryMb) && configuredMemoryMb >= 512 && configuredMemoryMb <= 65536
+    ? configuredMemoryMb
+    : 4096;
   const launchArgs = isWindows
     ? ['/d', '/s', '/c', rebuild
-      ? 'cd /d Server && call mvnw.cmd clean package -DskipTests && xcopy /Y target\*-with-dependencies.jar server.jar* >nul && echo __09TEST_STARTING__ && java -jar server.jar %PORTAL_WORLD_CONFIG%'
-      : 'cd /d Server && java -jar server.jar %PORTAL_WORLD_CONFIG%']
+      ? 'cd /d Server && call mvnw.cmd clean package -DskipTests && xcopy /Y target\*-with-dependencies.jar server.jar* >nul && echo __09TEST_STARTING__ && java -Xmx%SERVER_MEMORY_MB%m -jar server.jar %PORTAL_WORLD_CONFIG%'
+      : 'cd /d Server && java -Xmx%SERVER_MEMORY_MB%m -jar server.jar %PORTAL_WORLD_CONFIG%']
     : ['-lc', rebuild
-      ? 'cd Server && ./mvnw clean package -DskipTests && cp target/*-with-dependencies.jar server.jar && echo __09TEST_STARTING__ && exec java -jar server.jar "$PORTAL_WORLD_CONFIG"'
-      : 'cd Server && exec java -jar server.jar "$PORTAL_WORLD_CONFIG"'];
+      ? 'cd Server && ./mvnw clean package -DskipTests && cp target/*-with-dependencies.jar server.jar && echo __09TEST_STARTING__ && exec java -Xmx${SERVER_MEMORY_MB}m -jar server.jar "$PORTAL_WORLD_CONFIG"'
+      : 'cd Server && exec java -Xmx${SERVER_MEMORY_MB}m -jar server.jar "$PORTAL_WORLD_CONFIG"'];
   serverPhase = rebuild ? 'compiling' : 'starting';
   serverProcess = spawn(executable, launchArgs, {
     cwd: serverRoot,
-    env: { ...javaEnvironment(), PORTAL_WORLD_CONFIG: worldConfigLaunchPath },
+    env: { ...javaEnvironment(), PORTAL_WORLD_CONFIG: worldConfigLaunchPath, SERVER_MEMORY_MB: String(serverMemoryMb) },
     windowsHide: true,
     stdio: ['pipe', 'pipe', 'pipe'],
   });
   serverStartedAt = new Date().toISOString();
   lastExit = null;
   fs.writeFileSync(serverPidPath, String(serverProcess.pid), 'utf8');
-  audit(actor, 'server.start', rebuild ? 'clean rebuild' : 'existing server.jar');
+  audit(actor, 'server.start', `${rebuild ? 'clean rebuild' : 'existing server.jar'}; max heap=${serverMemoryMb} MB`);
   attachProcess(serverProcess, 'server', (code, signal) => {
     lastExit = { code, signal, at: new Date().toISOString() };
     serverProcess = null;
@@ -740,12 +745,16 @@ app.put('/api/settings', requireLocalAdmin, (req, res) => {
     const deployMode = req.body.deployMode === 'mk2' ? 'mk2' : req.body.deployMode === 'classic' ? 'classic' : null;
     const dailyRedeployTime = String(req.body.dailyRedeployTime || '');
     const redeployIntervalHours = Number(req.body.redeployIntervalHours);
+    const serverMemoryMb = Number(req.body.serverMemoryMb);
     if (!deployMode) return res.status(400).json({ error: 'Choose classic or mk2 deployment mode.' });
     if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(dailyRedeployTime)) {
       return res.status(400).json({ error: 'Enter the first run time as HH:MM.' });
     }
     if (!Number.isInteger(redeployIntervalHours) || redeployIntervalHours < 1 || redeployIntervalHours > 168) {
       return res.status(400).json({ error: 'Enter a restart interval from 1 to 168 hours.' });
+    }
+    if (!Number.isInteger(serverMemoryMb) || serverMemoryMb < 512 || serverMemoryMb > 65536) {
+      return res.status(400).json({ error: 'Enter maximum server memory from 512 to 65536 MB.' });
     }
     const previous = readSettings();
     const dailyRedeployEnabled = req.body.dailyRedeployEnabled === true;
@@ -755,6 +764,7 @@ app.put('/api/settings', requireLocalAdmin, (req, res) => {
     const settings = {
       ...previous,
       deployMode,
+      serverMemoryMb,
       dailyRedeployEnabled,
       dailyRedeployTime,
       redeployIntervalHours,
@@ -767,6 +777,7 @@ app.put('/api/settings', requireLocalAdmin, (req, res) => {
     writeSettings(settings);
     const changed = [];
     if (previous.deployMode !== settings.deployMode) changed.push(`deployment mode: ${previous.deployMode} -> ${settings.deployMode}`);
+    if (previous.serverMemoryMb !== settings.serverMemoryMb) changed.push(`maximum server memory: ${previous.serverMemoryMb} MB -> ${settings.serverMemoryMb} MB`);
     if (previous.dailyRedeployEnabled !== settings.dailyRedeployEnabled) changed.push(`automatic redeploy: ${previous.dailyRedeployEnabled ? 'enabled' : 'disabled'} -> ${settings.dailyRedeployEnabled ? 'enabled' : 'disabled'}`);
     if (previous.dailyRedeployTime !== settings.dailyRedeployTime) changed.push(`first run: ${previous.dailyRedeployTime} -> ${settings.dailyRedeployTime}`);
     if (previous.redeployIntervalHours !== settings.redeployIntervalHours) changed.push(`interval: ${previous.redeployIntervalHours}h -> ${settings.redeployIntervalHours}h`);

@@ -18,6 +18,7 @@ async function loadSettings() {
   if (!response.ok) throw new Error(result.error || 'Could not load settings.');
   canEdit = result.canEdit;
   document.querySelector('#deploy-mode').value = result.settings.deployMode;
+  document.querySelector('#server-memory').value = result.settings.serverMemoryMb || 4096;
   document.querySelector('#daily-enabled').checked = result.settings.dailyRedeployEnabled;
   document.querySelector('#daily-time').value = result.settings.dailyRedeployTime;
   document.querySelector('#interval-hours').value = result.settings.redeployIntervalHours || 4;
@@ -35,6 +36,7 @@ form.addEventListener('submit', async (event) => {
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
       deployMode: document.querySelector('#deploy-mode').value,
+      serverMemoryMb: Number(document.querySelector('#server-memory').value),
       dailyRedeployEnabled: document.querySelector('#daily-enabled').checked,
       dailyRedeployTime: document.querySelector('#daily-time').value,
       redeployIntervalHours: Number(document.querySelector('#interval-hours').value),

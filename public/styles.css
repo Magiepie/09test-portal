@@ -75,7 +75,7 @@ h2 { margin: 3px 0 0; font-size: 22px; }
 .settings-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 16px; }
 .settings-card form { display: grid; gap: 10px; margin-top: 22px; }
 .settings-card label { margin-top: 8px; color: var(--muted); font-size: 12px; font-weight: 700; }
-.settings-card select, .settings-card input[type="time"] { height: 44px; padding: 0 11px; border: 1px solid var(--line); border-radius: 8px; background: #0d1012; color: var(--text); }
+.settings-card select, .settings-card input[type="time"], .settings-card input[type="number"] { height: 44px; padding: 0 11px; border: 1px solid var(--line); border-radius: 8px; background: #0d1012; color: var(--text); }
 .check-row { padding: 14px; display: flex; align-items: flex-start; gap: 11px; border: 1px solid var(--line); border-radius: 9px; background: #0f1315; }
 .check-row input { margin-top: 3px; }
 .check-row strong, .check-row small { display: block; color: var(--text); }
