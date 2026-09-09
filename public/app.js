@@ -2,10 +2,11 @@ const consoleElement = document.querySelector('#console');
 const messageElement = document.querySelector('#action-message');
 let currentState = null;
 let socket = null;
+let restartCountdownDeadline = null;
 
 function restartCountdown(state) {
-  if (state?.server !== 'restart-pending' || !state.scheduledRestartAt) return null;
-  const seconds = Math.max(0, Math.ceil((new Date(state.scheduledRestartAt).getTime() - Date.now()) / 1000));
+  if (state?.server !== 'restart-pending' || restartCountdownDeadline === null) return null;
+  const seconds = Math.max(0, Math.ceil((restartCountdownDeadline - Date.now()) / 1000));
   if (seconds === 0) return '00:00';
   return `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`;
 }
@@ -216,6 +217,9 @@ function appendLine(entry) {
 
 function renderState(state) {
   currentState = state;
+  restartCountdownDeadline = state.server === 'restart-pending' && Number.isFinite(state.scheduledRestartSeconds)
+    ? Date.now() + state.scheduledRestartSeconds * 1000
+    : null;
   const online = state.server === 'online';
   const serverBusy = ['compiling', 'starting', 'stopping', 'restart-pending'].includes(state.server);
   const deploying = state.deployment !== 'idle';
@@ -231,7 +235,7 @@ function renderState(state) {
   toggleButton.textContent = state.server === 'stopping' ? 'Stopping…' : canStop ? 'Stop server' : 'Start server';
   toggleButton.classList.toggle('danger', canStop || state.server === 'stopping');
   toggleButton.classList.toggle('secondary', !canStop && state.server !== 'stopping');
-  toggleButton.disabled = deploying || state.server === 'stopping';
+  toggleButton.disabled = (deploying && state.server !== 'restart-pending') || state.server === 'stopping';
   document.querySelector('#command').disabled = !online && state.server !== 'restart-pending';
   document.querySelector('#branch-url').disabled = deploying || online || serverBusy;
   document.querySelector('#branch-form button').disabled = deploying || online || serverBusy;
@@ -263,7 +267,7 @@ async function action(url, body, method = 'POST') {
 document.querySelector('#deploy-button').addEventListener('click', () => action('/api/deployment/run').catch((e) => { messageElement.textContent = e.message; }));
 document.querySelector('#rebuild-button').addEventListener('click', () => action('/api/server/rebuild').catch((e) => { messageElement.textContent = e.message; }));
 document.querySelector('#run-all-button').addEventListener('click', () => {
-  if (!window.confirm('Run the full update workflow? An online server will receive a five-minute update countdown first.')) return;
+  if (!window.confirm('Run the full update workflow? An online server will receive its built-in one-minute update countdown first.')) return;
   action('/api/server/run-all').catch((e) => { messageElement.textContent = e.message; });
 });
 document.querySelector('#server-toggle-button').addEventListener('click', () => {

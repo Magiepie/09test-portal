@@ -333,6 +333,9 @@ function state() {
     server: lifecycle,
     deployment: deployProcess ? 'running' : scheduledRestartTimer ? 'countdown' : 'idle',
     scheduledRestartAt,
+    scheduledRestartSeconds: scheduledRestartAt
+      ? Math.max(0, Math.ceil((new Date(scheduledRestartAt).getTime() - Date.now()) / 1000))
+      : null,
     startedAt: serverStartedAt,
     lastExit,
     deployedMrs,
@@ -441,6 +444,16 @@ function stopServer(actor, afterStop = null) {
   }
 }
 
+function cancelScheduledRestart(actor) {
+  if (!scheduledRestartTimer) return false;
+  clearTimeout(scheduledRestartTimer);
+  scheduledRestartTimer = null;
+  scheduledRestartAt = null;
+  audit(actor, 'schedule.cancelled', 'administrator stop override');
+  addConsole('portal', 'Automatic redeployment countdown cancelled by administrator.');
+  return true;
+}
+
 function rebuildServer(actor) {
   if (deployProcess) throw new Error('Wait for the MR deployment to finish.');
   if (scheduledRestartTimer) throw new Error('Wait for the automatic restart countdown to finish.');
@@ -518,7 +531,7 @@ function redeployAndRestart(actor) {
   }
 }
 
-function beginScheduledRestart(actor, countdownMinutes = 5) {
+function beginScheduledRestart(actor, countdownMinutes = 1) {
   if (deployProcess) throw new Error('An MR deployment is already running.');
   if (scheduledRestartTimer) throw new Error('An automatic restart countdown is already running.');
   if (!serverProcess) {
@@ -528,7 +541,7 @@ function beginScheduledRestart(actor, countdownMinutes = 5) {
   }
   if (!serverProcess.stdin?.writable) throw new Error('The game server console is unavailable.');
 
-  const command = `update ${countdownMinutes}`;
+  const command = 'update';
   serverProcess.stdin.write(`${command}\r\n`);
   addConsole('admin', `> ${command} (automatic schedule)`);
   scheduledRestartAt = new Date(Date.now() + countdownMinutes * 60 * 1000).toISOString();
@@ -836,7 +849,12 @@ app.post('/api/server/start', requireAdmin, (req, res) => {
 });
 
 app.post('/api/server/stop', requireAdmin, (req, res) => {
-  try { stopServer(userLabel(req)); res.status(202).json(state()); }
+  try {
+    const actor = userLabel(req);
+    cancelScheduledRestart(actor);
+    stopServer(actor);
+    res.status(202).json(state());
+  }
   catch (error) { res.status(409).json({ error: error.message }); }
 });
 
@@ -848,7 +866,7 @@ app.post('/api/server/rebuild', requireAdmin, (req, res) => {
 app.post('/api/server/run-all', requireAdmin, (req, res) => {
   try {
     audit(userLabel(req), 'server.run-all');
-    beginScheduledRestart(userLabel(req), 5);
+    beginScheduledRestart(userLabel(req), 1);
     res.status(202).json(state());
   } catch (error) {
     res.status(409).json({ error: error.message });
@@ -923,9 +941,16 @@ app.post('/api/console', requireAdmin, (req, res) => {
   const command = String(req.body.command || '').trim();
   if (!serverProcess || !serverProcess.stdin?.writable) return res.status(409).json({ error: 'Server console is unavailable.' });
   if (!command || command.length > 300) return res.status(400).json({ error: 'Enter a command of 1–300 characters.' });
+  const actor = userLabel(req);
+  const isStopCommand = command.toLowerCase() === 'stop';
+  if (isStopCommand) cancelScheduledRestart(actor);
   serverProcess.stdin.write(`${command}\r\n`);
   addConsole('admin', `> ${command}`);
-  audit(userLabel(req), 'console.command', command);
+  audit(actor, 'console.command', command);
+  if (isStopCommand) {
+    serverPhase = 'stopping';
+    broadcastState();
+  }
   res.status(202).json({ ok: true });
 });
 
@@ -956,7 +981,7 @@ function checkRedeploySchedule() {
       return;
     }
     if (now < next) return;
-    beginScheduledRestart('interval-scheduler', 5);
+    beginScheduledRestart('interval-scheduler', 1);
     settings.lastScheduledAt = now.toISOString();
     const intervalMs = settings.redeployIntervalHours * 60 * 60 * 1000;
     do { next = new Date(next.getTime() + intervalMs); } while (next <= now);
